@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Save, RefreshCw, Bell, Globe, Layout, Mail, Shield, UserPlus, Users, Trash2, Key, Database, AlertOctagon } from 'lucide-react';
+import { Save, RefreshCw, Bell, Globe, Layout, Mail, Shield, UserPlus, Users, Trash2, Key, Database, AlertOctagon, Anchor, Plane, Ship } from 'lucide-react';
 import { AppSettings, Currency, SharedProps, User, UserRole } from '../types';
 
 interface SettingsProps extends SharedProps {
@@ -25,6 +24,19 @@ const Settings: React.FC<SettingsProps> = ({ settings, onUpdateSettings, onNotif
 
   const handleChange = (field: keyof AppSettings, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleCommercialParam = (modality: 'sea' | 'air', key: string, value: number) => {
+    setFormData(prev => ({
+      ...prev,
+      commercialParameters: {
+        ...prev.commercialParameters,
+        [modality]: {
+          ...prev.commercialParameters[modality],
+          [key]: value
+        }
+      }
+    }));
   };
 
   const handleSave = () => {
@@ -74,7 +86,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onUpdateSettings, onNotif
   };
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-8 animate-fade-in max-w-4xl mx-auto pb-20">
       <div className="bg-slate-900 text-white p-8 rounded-2xl shadow-xl flex justify-between items-center border border-slate-800">
         <div>
           <h2 className="text-2xl font-bold flex items-center"><Layout className="mr-3 text-blue-500" /> Unique CCS Administration</h2>
@@ -90,6 +102,90 @@ const Settings: React.FC<SettingsProps> = ({ settings, onUpdateSettings, onNotif
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         
+        {/* Sea Freight Parameters */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3 uppercase tracking-tighter italic">
+            <Ship className="mr-2 text-blue-600" size={20} /> Sea Logistics DNA
+          </h3>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">LCL Min CBM</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.sea.lclMinCbm}
+                  onChange={e => handleCommercialParam('sea', 'lclMinCbm', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">W/M Rule (kg)</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.sea.wmRule}
+                  onChange={e => handleCommercialParam('sea', 'wmRule', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
+                />
+              </div>
+            </div>
+            <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Standard Documentation Fee</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.sea.docFee}
+                  onChange={e => handleCommercialParam('sea', 'docFee', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
+                />
+            </div>
+            <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Default Local Charges (LCL)</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.sea.defaultLocalCharges}
+                  onChange={e => handleCommercialParam('sea', 'defaultLocalCharges', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
+                />
+            </div>
+          </div>
+        </div>
+
+        {/* Air Freight Parameters */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3 uppercase tracking-tighter italic">
+            <Plane className="mr-2 text-indigo-600" size={20} /> Air Logistics DNA
+          </h3>
+          <div className="space-y-4">
+            <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Volumetric Factor (cm3/kg)</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.air.volumetricFactor}
+                  onChange={e => handleCommercialParam('air', 'volumetricFactor', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
+                />
+                <p className="text-[9px] text-slate-400 mt-1 italic">Standard IATA: 6000 or 5000</p>
+            </div>
+            <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Min Chargeable Weight (kg)</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.air.minChargeableWeight}
+                  onChange={e => handleCommercialParam('air', 'minChargeableWeight', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
+                />
+            </div>
+            <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Default Security Surcharges</label>
+                <input 
+                  type="number" 
+                  value={formData.commercialParameters.air.defaultSurcharges}
+                  onChange={e => handleCommercialParam('air', 'defaultSurcharges', Number(e.target.value))}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
+                />
+            </div>
+          </div>
+        </div>
+
         {/* Profile Security */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
             <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3">

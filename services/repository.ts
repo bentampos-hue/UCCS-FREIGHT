@@ -1,5 +1,4 @@
-
-import { Vendor, Customer, Quotation, VendorEnquiry, ActivityLog, AppSettings, User, Shipment, CommunicationMessage, ApprovalRequest, AuditLog } from '../types';
+import { Vendor, Customer, Quotation, VendorEnquiry, ActivityLog, AppSettings, User, Shipment, CommunicationMessage, ApprovalRequest, AuditLog, CommercialParameters } from '../types';
 import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc } from './firebase';
 
 class Repository {
@@ -41,6 +40,39 @@ class Repository {
         }
     }
 
+    async saveItemsBulk<T extends { id: string }>(key: string, items: T[], user: User) {
+        if (this.storageType === 'CLOUD') {
+            for (const item of items) {
+                await setDoc(doc(db, key, item.id), item);
+            }
+        } else {
+            const data = await this.loadCollection<T>(key);
+            const existingIds = new Set(data.map(i => i.id));
+            const newData = [...data];
+            
+            items.forEach(item => {
+                if (existingIds.has(item.id)) {
+                    const idx = newData.findIndex(i => i.id === item.id);
+                    newData[idx] = item;
+                } else {
+                    newData.push(item);
+                }
+            });
+            localStorage.setItem(`uccs_${key}`, JSON.stringify(newData));
+        }
+        
+        const log: ActivityLog = {
+            id: `AL-BULK-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            module: 'Data',
+            action: 'BULK_IMPORT',
+            description: `Imported ${items.length} records into ${key}.`
+        };
+        // Log locally for simplicity in this context
+        const logs = JSON.parse(localStorage.getItem('uccs_activity_logs') || '[]');
+        localStorage.setItem('uccs_activity_logs', JSON.stringify([log, ...logs]));
+    }
+
     // --- Specific Collections ---
     async getShipments() { return this.loadCollection<Shipment>('shipments'); }
     async getMessages() { return this.loadCollection<CommunicationMessage>('messages'); }
@@ -71,8 +103,20 @@ class Repository {
     // Settings
     getSettings(defaultSettings: AppSettings): AppSettings {
         const stored = localStorage.getItem('uccs_settings');
-        return stored ? JSON.parse(stored) : defaultSettings;
+        if (!stored) return defaultSettings;
+        const parsed = JSON.parse(stored);
+        
+        // Migration: Ensure commercialParameters exist
+        if (!parsed.commercialParameters) {
+            parsed.commercialParameters = {
+                sea: { lclMinCbm: 1, wmRule: 1000, docFee: 50, defaultLocalCharges: 150 },
+                air: { volumetricFactor: 6000, minChargeableWeight: 45, defaultSurcharges: 85 }
+            };
+            this.saveSettings(parsed);
+        }
+        return parsed;
     }
+
     saveSettings(settings: AppSettings) {
         localStorage.setItem('uccs_settings', JSON.stringify(settings));
     }

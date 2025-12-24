@@ -1,4 +1,3 @@
-
 export enum AppView {
   LOGIN = 'login',
   DASHBOARD = 'dashboard',
@@ -144,6 +143,12 @@ export interface Quotation {
   trackingNumber?: string;
   milestones?: Milestone[];
   cargoType?: string;
+  details?: {
+    weight?: number;
+    volume?: number;
+    chargeable?: number;
+    equipment?: string;
+  };
 }
 
 export interface VendorBid {
@@ -211,12 +216,27 @@ export interface PackagingDetail {
   weight?: number;
 }
 
+export interface CommercialParameters {
+  sea: {
+    lclMinCbm: number;
+    wmRule: number; // e.g., 1000kg = 1cbm
+    docFee: number;
+    defaultLocalCharges: number;
+  };
+  air: {
+    volumetricFactor: number; // e.g., 6000
+    minChargeableWeight: number;
+    defaultSurcharges: number;
+  };
+}
+
 export interface AppSettings {
   companyName: string;
   defaultCurrency: Currency;
   defaultMarginPercent: number;
   emailProvider?: string;
   emailSignature: string;
+  commercialParameters: CommercialParameters;
 }
 
 export interface QuoteRequest {

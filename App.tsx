@@ -16,7 +16,10 @@ import {
   Info,
   X,
   Workflow,
-  Target
+  Target,
+  FlaskConical,
+  ExternalLink,
+  User as UserIcon
 } from 'lucide-react';
 
 import { 
@@ -46,6 +49,8 @@ import CRM from './components/CRM';
 import VendorEnquiryComponent from './components/VendorEnquiry';
 import Settings from './components/Settings';
 import WorkflowVisualizer from './components/WorkflowVisualizer';
+import VendorBidPortal from './components/VendorBidPortal';
+import CustomerQuotePortal from './components/CustomerQuotePortal';
 
 const App: React.FC = () => {
   // --- Global State ---
@@ -53,12 +58,18 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [notifications, setNotifications] = useState<{id: string, type: string, message: string}[]>([]);
+  const [portalToken, setPortalToken] = useState<string | null>(null);
   
+  // Fixed: Initializing AppSettings with mandatory commercialParameters to satisfy TypeScript.
   const [settings, setSettings] = useState<AppSettings>({
     companyName: 'FreightFlow Global',
     defaultCurrency: 'USD',
     defaultMarginPercent: 15,
-    emailSignature: 'Best Regards,\nFreightFlow Logistics Team'
+    emailSignature: 'Best Regards,\nFreightFlow Logistics Team',
+    commercialParameters: {
+      sea: { lclMinCbm: 1, wmRule: 1000, docFee: 50, defaultLocalCharges: 150 },
+      air: { volumetricFactor: 6000, minChargeableWeight: 45, defaultSurcharges: 85 }
+    }
   });
 
   // --- Data State ---
@@ -83,7 +94,6 @@ const App: React.FC = () => {
         repo.getUsers()
       ]);
 
-      // Seed default admin if none exists
       if (u.length === 0) {
         const admin: User = { id: 'U001', name: 'Admin User', email: 'admin@uniqueccs.com', role: 'ADMIN', password: 'admin123' };
         await repo.saveItem('users', admin, admin);
@@ -98,6 +108,16 @@ const App: React.FC = () => {
       setEnquiries(e);
     };
     init();
+
+    // Check URL for portal access simulation
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const type = params.get('type');
+    if (token && type) {
+       setPortalToken(token);
+       if (type === 'bid') setCurrentView(AppView.VENDOR_PORTAL);
+       if (type === 'quote') setCurrentView(AppView.CUSTOMER_PORTAL);
+    }
   }, []);
 
   // --- Handlers ---
@@ -174,7 +194,7 @@ const App: React.FC = () => {
 
     const newQuote: Quotation = {
       id: `Q-AWARD-${Date.now().toString().slice(-4)}`,
-      portalToken: 'manual-award',
+      portalToken: Math.random().toString(36).substr(2, 12),
       modality: enquiry.modality,
       customerId: 'C-SPOT',
       customerName: 'Spot Market Client',
@@ -185,7 +205,7 @@ const App: React.FC = () => {
       buyRate: bid.amount,
       margin: sellPrice - bid.amount,
       currency: bid.currency,
-      status: 'CONFIRMED',
+      status: 'SENT',
       date: new Date().toISOString().split('T')[0],
       milestones: [{
         status: 'BOOKING_CONFIRMED',
@@ -202,7 +222,7 @@ const App: React.FC = () => {
     await repo.saveItem('enquiries', updatedEnquiry, currentUser!);
     setEnquiries(prev => prev.map(e => e.id === enquiryId ? updatedEnquiry : e));
 
-    addNotification('success', `Awarding ${bid.vendorName} and initializing shipment.`);
+    addNotification('success', `Awarding ${bid.vendorName}. Quote dispatched to Spot Client.`);
     setCurrentView(AppView.REPORTS);
   };
 
@@ -217,7 +237,6 @@ const App: React.FC = () => {
     setQuotations(prev => prev.map(q => q.id === id ? updatedQuote : q));
   };
 
-  // --- Views ---
   const sharedProps = {
     settings,
     userRole: currentUser?.role || 'SALES',
@@ -227,6 +246,27 @@ const App: React.FC = () => {
     onNavigate: setCurrentView
   };
 
+  // Simulation Logic
+  const openPortalSim = (type: 'bid' | 'quote') => {
+    let token = '';
+    if (type === 'bid') {
+      token = enquiries[0]?.portalToken || '';
+      if (!token) { addNotification('warning', 'Create an Enquiry first to test Bid Portal.'); return; }
+    } else {
+      token = quotations[0]?.portalToken || '';
+      if (!token) { addNotification('warning', 'Generate a Quote first to test Customer Portal.'); return; }
+    }
+    setPortalToken(token);
+    setCurrentView(type === 'bid' ? AppView.VENDOR_PORTAL : AppView.CUSTOMER_PORTAL);
+  };
+
+  if (currentView === AppView.VENDOR_PORTAL && portalToken) {
+    return <div className="animate-fade-in"><VendorBidPortal token={portalToken} /><SimulationBar onExit={() => setCurrentView(AppView.DASHBOARD)} /></div>;
+  }
+  if (currentView === AppView.CUSTOMER_PORTAL && portalToken) {
+    return <div className="animate-fade-in"><CustomerQuotePortal token={portalToken} /><SimulationBar onExit={() => setCurrentView(AppView.DASHBOARD)} /></div>;
+  }
+
   if (!currentUser) {
     return <Login onLogin={handleLogin} users={users} />;
   }
@@ -235,7 +275,7 @@ const App: React.FC = () => {
     switch (currentView) {
       case AppView.DASHBOARD:
         return (
-          <div className="space-y-8">
+          <div className="space-y-8 animate-fade-in">
             <Dashboard 
               {...sharedProps} 
               activityLog={activityLog} 
@@ -282,7 +322,6 @@ const App: React.FC = () => {
             onAwardEnquiry={handleAwardEnquiry}
             onLoadToSimulator={(req) => {
               setCurrentView(AppView.SIMULATOR);
-              // Implementation would pre-fill simulator state
             }}
           />
         );
@@ -300,7 +339,6 @@ const App: React.FC = () => {
               setUsers(prev => [...prev, u]);
             }}
             onDeleteUser={async (id) => {
-              // Implementation would call repo.deleteItem if available
               setUsers(prev => prev.filter(u => u.id !== id));
             }}
           />
@@ -311,11 +349,9 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex font-sans">
-      {/* --- Sidebar --- */}
-      <aside className={`${isSidebarOpen ? 'w-80' : 'w-24'} bg-slate-900 transition-all duration-500 flex flex-col relative z-50 shadow-2xl overflow-hidden`}>
-        <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Ship size={240} className="text-white" /></div>
-        
+    <div className="min-h-screen bg-slate-50 flex font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-80' : 'w-24'} bg-slate-900 transition-all duration-500 flex flex-col relative z-50 shadow-2xl overflow-hidden shrink-0`}>
         <div className="p-8 flex items-center gap-4 border-b border-slate-800 relative z-10">
           <div className="bg-blue-600 p-3 rounded-2xl shadow-xl shadow-blue-500/20">
             <Ship className="text-white" size={24} />
@@ -352,30 +388,28 @@ const App: React.FC = () => {
           ))}
         </nav>
 
-        <div className="p-6 border-t border-slate-800 relative z-10">
-          <button
-            onClick={() => setCurrentView(AppView.SETTINGS)}
-            className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all mb-2 ${
-              currentView === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
+        <div className="p-6 border-t border-slate-800 relative z-10 space-y-2">
+          <button onClick={() => openPortalSim('bid')} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-blue-400 text-[10px] font-black uppercase tracking-widest transition-all italic">
+            <FlaskConical size={14} /> {isSidebarOpen && "Simulate Vendor"}
+          </button>
+          <button onClick={() => openPortalSim('quote')} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-emerald-400 text-[10px] font-black uppercase tracking-widest transition-all italic">
+            <ExternalLink size={14} /> {isSidebarOpen && "Simulate Client"}
+          </button>
+          <div className="h-px bg-slate-800 my-4"></div>
+          <button onClick={() => setCurrentView(AppView.SETTINGS)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all ${currentView === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
             <SettingsIcon size={20} />
             {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Settings</span>}
           </button>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:bg-red-500 hover:text-white transition-all group"
-          >
+          <button onClick={handleLogout} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:bg-red-500 hover:text-white transition-all group">
             <LogOut size={20} className="group-hover:translate-x-1 transition-transform" />
             {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Exit Portal</span>}
           </button>
         </div>
       </aside>
 
-      {/* --- Main Content --- */}
+      {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-10 py-6 flex justify-between items-center z-40">
+        <header className="bg-white border-b border-slate-200 px-10 py-6 flex justify-between items-center z-40 shrink-0">
           <div className="flex items-center gap-6">
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-400 hover:text-slate-900 transition-colors">
               <Workflow size={24} />
@@ -384,44 +418,38 @@ const App: React.FC = () => {
               {currentView.replace('_', ' ')}
             </h2>
           </div>
-
-          <div className="flex items-center gap-8">
-            <div className="hidden md:flex relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18} />
-              <input 
-                type="text" 
-                placeholder="Global File Search..." 
-                className="pl-12 pr-6 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase tracking-widest outline-none focus:bg-white focus:border-blue-400 w-80 shadow-inner transition-all"
-              />
-            </div>
-            
-            <div className="flex items-center gap-4">
-               <button className="relative p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-blue-600 transition-all border border-slate-100">
-                  <Bell size={20} />
-                  <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>
-               </button>
-               <div className="h-10 w-px bg-slate-100"></div>
-               <div className="flex items-center gap-4 group cursor-pointer">
-                  <div className="text-right">
-                    <p className="text-xs font-black text-slate-900 uppercase tracking-tighter">{currentUser.name}</p>
-                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">{currentUser.role}</p>
-                  </div>
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-100 border-2 border-white shadow-lg flex items-center justify-center text-indigo-600 font-black italic transition-transform group-hover:scale-105">
-                    {currentUser.name.charAt(0)}
-                  </div>
-               </div>
-            </div>
+          <div className="flex items-center gap-4">
+             <div className="text-right hidden sm:block">
+               <p className="text-xs font-black text-slate-900 uppercase tracking-tighter">{currentUser.name}</p>
+               <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">{currentUser.role}</p>
+             </div>
+             <div className="w-12 h-12 rounded-2xl bg-slate-900 border-2 border-white shadow-lg flex items-center justify-center text-white font-black italic">
+               {currentUser.name.charAt(0)}
+             </div>
           </div>
         </header>
 
-        {/* Dynamic View */}
-        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar bg-slate-50/50">
+        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar bg-slate-50/50 pb-20">
           {renderView()}
+        </div>
+
+        {/* Debug Simulation Bar */}
+        <div className="h-12 bg-slate-900 border-t border-slate-800 flex items-center px-10 justify-between shrink-0 z-50">
+           <div className="flex items-center gap-6">
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2 italic">
+                <FlaskConical size={12} className="text-blue-500"/> Simulation Environment
+              </span>
+              <div className="flex gap-2">
+                 <button onClick={() => openPortalSim('bid')} className="text-[8px] font-black text-blue-400 border border-blue-900 px-3 py-1 rounded hover:bg-blue-900 transition-colors italic uppercase tracking-widest">Portal: Vendor Bid</button>
+                 <button onClick={() => openPortalSim('quote')} className="text-[8px] font-black text-emerald-400 border border-emerald-900 px-3 py-1 rounded hover:bg-emerald-900 transition-colors italic uppercase tracking-widest">Portal: Client Accept</button>
+              </div>
+           </div>
+           <div className="text-[9px] font-bold text-slate-600 italic">Connected to Global Node • Latency: 4ms</div>
         </div>
       </main>
 
-      {/* --- Notifications Toasts --- */}
-      <div className="fixed bottom-10 right-10 z-[100] flex flex-col gap-4 pointer-events-none">
+      {/* Notifications */}
+      <div className="fixed bottom-16 right-10 z-[100] flex flex-col gap-4 pointer-events-none">
         {notifications.map(n => (
           <div key={n.id} className={`pointer-events-auto min-w-[320px] p-6 rounded-[2rem] shadow-2xl border flex items-start gap-4 animate-fade-in ${
             n.type === 'success' ? 'bg-emerald-900 border-emerald-800 text-emerald-50' :
@@ -435,10 +463,7 @@ const App: React.FC = () => {
                n.type === 'warning' ? 'bg-amber-800 text-amber-400' :
                'bg-slate-800 text-blue-400'
             }`}>
-              {n.type === 'success' ? <CheckCircle2 size={20}/> : 
-               n.type === 'error' ? <AlertCircle size={20}/> : 
-               n.type === 'warning' ? <AlertCircle size={20}/> : 
-               <Info size={20}/>}
+              {n.type === 'success' ? <CheckCircle2 size={20}/> : <Info size={20}/>}
             </div>
             <div className="flex-1 pt-0.5">
                <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-50 italic">{n.type}</p>
@@ -450,5 +475,17 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+const SimulationBar: React.FC<{ onExit: () => void }> = ({ onExit }) => (
+  <div className="fixed bottom-0 left-0 w-full bg-blue-600 text-white px-10 py-3 flex justify-between items-center z-[200] animate-fade-in italic">
+    <div className="flex items-center gap-4">
+      <FlaskConical size={18} className="animate-pulse" />
+      <span className="text-[10px] font-black uppercase tracking-[0.2em]">Viewing External Stakeholder Portal Experience</span>
+    </div>
+    <button onClick={onExit} className="bg-white text-blue-600 px-6 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+      Return to Master Control
+    </button>
+  </div>
+);
 
 export default App;
