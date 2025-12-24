@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Eye, Download, ChevronLeft, ChevronRight, X, Activity, CheckCircle, ArrowRight, Plane, Ship, Mail, Send, Bell, Loader2, FileText, BarChart3, Database, Filter, ExternalLink, RefreshCw, Globe, User, Target, TrendingUp, Briefcase, PieChart as PieIcon } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, Eye, Download, ChevronLeft, ChevronRight, X, Activity, CheckCircle, ArrowRight, Plane, Ship, Mail, Send, Bell, Loader2, FileText, BarChart3, Database, Filter, ExternalLink, RefreshCw, Globe, User, Target, TrendingUp, Briefcase, PieChart as PieIcon, Trash2, Plus } from 'lucide-react';
 import { Quotation, QuoteStatus, SharedProps, Milestone, ShipmentMilestoneStatus, VendorEnquiry } from '../types';
 import { analyticsService } from '../services/analyticsService';
+import { repo } from '../services/repository';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface ReportsProps extends SharedProps {
@@ -12,12 +13,16 @@ interface ReportsProps extends SharedProps {
   defaultFilter?: QuoteStatus | 'ALL';
 }
 
-const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus, onAddMilestone, defaultFilter = 'ALL', onNotify, userRole, currentUser, settings }) => {
+const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus, onAddMilestone, onNotify, userRole, currentUser, settings }) => {
   const [activeTab, setActiveTab] = useState<'LEDGER' | 'ANALYTICS'>('LEDGER');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedQuote, setSelectedQuote] = useState<Quotation | null>(null);
   
+  // Detail view state for adding milestones
+  const [milestoneStatus, setMilestoneStatus] = useState<ShipmentMilestoneStatus | string>('BOOKING_CONFIRMED');
+  const [milestoneNotes, setMilestoneNotes] = useState('');
+
   const itemsPerPage = 10;
 
   const stats = useMemo(() => analyticsService.calculateKPIs(quotations, enquiries), [quotations, enquiries]);
@@ -56,6 +61,32 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
     }, 1000);
   };
 
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      if (userRole !== 'ADMIN') {
+          onNotify('error', 'Only administrators can delete ledger records.');
+          return;
+      }
+      if (window.confirm(`Permanently remove record ${id} from global ledger?`)) {
+          await repo.deleteItem('quotations', id, currentUser);
+          onNotify('success', `Record ${id} purged from system.`);
+          window.location.reload(); // Simple refresh to update global list in this context
+      }
+  };
+
+  const handleAddMilestoneLocal = () => {
+      if (!selectedQuote) return;
+      const newMilestone: Milestone = {
+          status: milestoneStatus,
+          date: new Date().toISOString(),
+          notes: milestoneNotes,
+          updatedBy: currentUser.name
+      };
+      onAddMilestone(selectedQuote.id, newMilestone);
+      setMilestoneNotes('');
+      onNotify('success', 'Event logged to shipment lifecycle.');
+  };
+
   return (
     <div className="space-y-8 animate-fade-in pb-20 italic">
         <div className="flex bg-slate-900/5 p-2 rounded-[2.5rem] w-fit italic">
@@ -82,7 +113,7 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                     <div className="lg:col-span-1 bg-white p-12 rounded-[4rem] border-2 border-slate-50 shadow-sm flex flex-col italic">
-                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mb-12 flex items-center"><PieIcon size={16} className="mr-3 text-blue-600"/> Conversion Map</h4>
+                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mb-12 flex items-center"><PieIcon size={16} className="mr-3 text-blue-600"/> Conversion Distribution</h4>
                         <div className="flex-1 min-h-[350px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -104,7 +135,7 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
                     </div>
 
                     <div className="lg:col-span-2 bg-white p-12 rounded-[4rem] border-2 border-slate-50 shadow-sm">
-                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mb-12 flex items-center"><BarChart3 size={16} className="mr-3 text-blue-600"/> High-Corridor Volume Velocity</h4>
+                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mb-12 flex items-center"><BarChart3 size={16} className="mr-3 text-blue-600"/> corridor volume velocity</h4>
                         <div className="h-[450px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={[
@@ -148,7 +179,7 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
                             />
                         </div>
                         <button onClick={handleExportCSV} className="px-10 py-4 bg-slate-900 text-white rounded-3xl text-[11px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-95 italic">
-                            <Database size={16}/> EXPORT CSV
+                            <Database size={16}/> EXPORT MASTER LEDGER
                         </button>
                     </div>
                 </div>
@@ -167,7 +198,7 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
                         </thead>
                         <tbody className="divide-y divide-slate-50 font-sans italic">
                             {paginatedQuotes.map((quote) => (
-                                <tr key={quote.id} className="group hover:bg-blue-50/50 transition-all">
+                                <tr key={quote.id} onClick={() => setSelectedQuote(quote)} className="group hover:bg-blue-50/50 transition-all cursor-pointer">
                                     <td className="px-12 py-8 font-black text-slate-900 text-[13px] tracking-tighter uppercase">{quote.id}</td>
                                     <td className="px-12 py-8">
                                         <div className={`p-4 rounded-[1.5rem] text-white w-fit ${quote.modality === 'SEA' ? 'bg-blue-600 shadow-xl' : 'bg-indigo-600 shadow-xl'} shadow-lg`}>
@@ -189,9 +220,16 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
                                         </span>
                                     </td>
                                     <td className="px-12 py-8 text-right">
-                                        <button onClick={() => setSelectedQuote(quote)} className="p-4 text-slate-300 hover:text-blue-600 hover:bg-white rounded-[1.5rem] transition-all shadow-sm group-hover:shadow-2xl border-2 border-transparent hover:border-slate-100 active:scale-90">
-                                            <Eye size={24} />
-                                        </button>
+                                        <div className="flex justify-end gap-3">
+                                            <button className="p-4 text-slate-300 hover:text-blue-600 hover:bg-white rounded-[1.5rem] transition-all shadow-sm group-hover:shadow-2xl border-2 border-transparent hover:border-slate-100 active:scale-90">
+                                                <Eye size={24} />
+                                            </button>
+                                            {userRole === 'ADMIN' && (
+                                                <button onClick={(e) => handleDelete(e, quote.id)} className="p-4 text-slate-300 hover:text-red-600 hover:bg-white rounded-[1.5rem] transition-all border-2 border-transparent hover:border-red-100 active:scale-90">
+                                                    <Trash2 size={24} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -245,11 +283,71 @@ const Reports: React.FC<ReportsProps> = ({ quotations, enquiries, onUpdateStatus
                             </div>
                         )}
 
-                        <div className="space-y-12">
-                             <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center"><Activity size={20} className="mr-5 text-blue-600"/> GLOBAL EVENT LOG</h4>
-                             <div className="bg-slate-50 p-12 rounded-[4rem] border-2 border-slate-100 min-h-[300px] flex items-center justify-center text-slate-300 font-black uppercase tracking-[0.5em]">
-                                Records synchronized upon confirmation signal.
-                             </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                            {/* Milestone Tracker */}
+                            <div className="space-y-8">
+                                <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center"><Activity size={20} className="mr-5 text-blue-600"/> GLOBAL EVENT LOG</h4>
+                                <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 space-y-8 max-h-[500px] overflow-y-auto custom-scrollbar">
+                                    {selectedQuote.milestones && selectedQuote.milestones.length > 0 ? (
+                                        selectedQuote.milestones.map((m, i) => (
+                                            <div key={i} className="flex gap-6 relative group animate-fade-in">
+                                                <div className="w-12 h-12 rounded-2xl bg-white border-2 border-slate-100 flex items-center justify-center shrink-0 shadow-sm transition-all group-hover:border-blue-400">
+                                                    <CheckCircle size={20} className="text-blue-500" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{new Date(m.date).toLocaleString()}</p>
+                                                    <p className="text-sm font-black text-slate-900 uppercase italic tracking-tighter">{m.status}</p>
+                                                    {m.notes && <p className="text-xs text-slate-500 mt-2 font-bold italic leading-relaxed">"{m.notes}"</p>}
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center py-10 opacity-30">
+                                            <Activity size={40} className="mb-4" />
+                                            <p className="text-[10px] font-black uppercase tracking-widest">No Events Synchronized</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Operations Control */}
+                            <div className="space-y-8">
+                                <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center"><Target size={20} className="mr-5 text-indigo-600"/> LIFECYCLE MANAGEMENT</h4>
+                                <div className="bg-white p-10 rounded-[3rem] border-2 border-slate-100 shadow-inner space-y-6">
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Event Classification</label>
+                                        <select 
+                                            value={milestoneStatus}
+                                            onChange={e => setMilestoneStatus(e.target.value)}
+                                            className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-400 text-sm font-black uppercase italic shadow-inner"
+                                        >
+                                            <option value="BOOKING_CONFIRMED">Booking Authorized</option>
+                                            <option value="CARGO_PICKED_UP">Collection Synchronized</option>
+                                            <option value="DEPARTED_POL">Origin Departure</option>
+                                            <option value="AT_SEA">Vessel in Transit</option>
+                                            <option value="ARRIVED_POD">Terminal Arrival</option>
+                                            <option value="CUSTOMS_CLEARED">Fiscal Release</option>
+                                            <option value="DELIVERED">Proof of Delivery</option>
+                                            <option value="EXCEPTION">Operation Exception</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Operational Notes</label>
+                                        <textarea 
+                                            value={milestoneNotes}
+                                            onChange={e => setMilestoneNotes(e.target.value)}
+                                            placeholder="Specify event details..."
+                                            className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-400 text-sm font-bold h-32 resize-none shadow-inner"
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={handleAddMilestoneLocal}
+                                        className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[1.5rem] font-black uppercase text-xs tracking-widest flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all italic"
+                                    >
+                                        <Plus size={18} /> REGISTER GLOBAL EVENT
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

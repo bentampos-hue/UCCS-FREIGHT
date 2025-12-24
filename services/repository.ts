@@ -1,6 +1,5 @@
-
 import { Vendor, Customer, Quotation, VendorEnquiry, ActivityLog, AppSettings, User, Shipment, CommunicationMessage, ApprovalRequest, AuditLog, CommercialParameters } from '../types';
-import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc } from './firebase';
+import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc as firestoreDeleteDoc } from './firebase';
 
 class Repository {
     private storageType: 'LOCAL' | 'CLOUD' = 'LOCAL';
@@ -18,7 +17,6 @@ class Repository {
     }
 
     async saveItem<T extends { id: string }>(key: string, item: T, user: User) {
-        // Audit Logging
         const log: AuditLog = {
             id: `LOG-${Date.now()}`,
             timestamp: new Date().toISOString(),
@@ -38,6 +36,28 @@ class Repository {
             const index = data.findIndex(i => i.id === item.id);
             if (index > -1) data[index] = item; else data.push(item);
             localStorage.setItem(`uccs_${key}`, JSON.stringify(data));
+        }
+    }
+
+    async deleteItem(key: string, id: string, user: User) {
+        const log: AuditLog = {
+            id: `LOG-DEL-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            userId: user.id,
+            userName: user.name,
+            action: 'DELETE',
+            entityType: key,
+            entityId: id,
+            changes: 'Record Deleted'
+        };
+        await this.addAuditLog(log);
+
+        if (this.storageType === 'CLOUD') {
+            await firestoreDeleteDoc(doc(db, key, id));
+        } else {
+            const data = await this.loadCollection<any>(key);
+            const filtered = data.filter(i => i.id !== id);
+            localStorage.setItem(`uccs_${key}`, JSON.stringify(filtered));
         }
     }
 
@@ -61,20 +81,8 @@ class Repository {
             });
             localStorage.setItem(`uccs_${key}`, JSON.stringify(newData));
         }
-        
-        const log: ActivityLog = {
-            id: `AL-BULK-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            module: 'Data',
-            action: 'BULK_IMPORT',
-            description: `Imported ${items.length} records into ${key}.`
-        };
-        // Log locally for simplicity in this context
-        const logs = JSON.parse(localStorage.getItem('uccs_activity_logs') || '[]');
-        localStorage.setItem('uccs_activity_logs', JSON.stringify([log, ...logs]));
     }
 
-    // --- Specific Collections ---
     async getShipments() { return this.loadCollection<Shipment>('shipments'); }
     async getMessages() { return this.loadCollection<CommunicationMessage>('messages'); }
     async getApprovals() { return this.loadCollection<ApprovalRequest>('approvals'); }
@@ -83,13 +91,11 @@ class Repository {
     async getUsers() { return this.loadCollection<User>('users'); }
     async getVendors() { return this.loadCollection<Vendor>('vendors'); }
     async getCustomers() { return this.loadCollection<Customer>('customers'); }
-    // Added: Missing method to retrieve audit logs, fixing error in AuditViewer.tsx
     async getAuditLogs() { return this.loadCollection<AuditLog>('audit_logs'); }
 
     async saveQuote(quote: Quotation, user: User) { return this.saveItem('quotations', quote, user); }
     async saveShipment(ship: Shipment, user: User) { return this.saveItem('shipments', ship, user); }
     async saveMessages(msgs: CommunicationMessage[]) { 
-        // Internal bulk save for local fallback
         localStorage.setItem('uccs_messages', JSON.stringify(msgs));
     }
 
@@ -98,26 +104,15 @@ class Repository {
             await setDoc(doc(db, 'audit_logs', log.id), log);
         } else {
             const logs = JSON.parse(localStorage.getItem('uccs_audit_logs') || '[]');
-            logs.push(log);
-            localStorage.setItem('uccs_audit_logs', JSON.stringify(logs));
+            logs.unshift(log);
+            localStorage.setItem('uccs_audit_logs', JSON.stringify(logs.slice(0, 500)));
         }
     }
 
-    // Settings
     getSettings(defaultSettings: AppSettings): AppSettings {
         const stored = localStorage.getItem('uccs_settings');
         if (!stored) return defaultSettings;
-        const parsed = JSON.parse(stored);
-        
-        // Migration: Ensure commercialParameters exist
-        if (!parsed.commercialParameters) {
-            parsed.commercialParameters = {
-                sea: { lclMinCbm: 1, wmRule: 1000, docFee: 50, defaultLocalCharges: 150 },
-                air: { volumetricFactor: 6000, minChargeableWeight: 45, defaultSurcharges: 85 }
-            };
-            this.saveSettings(parsed);
-        }
-        return parsed;
+        return JSON.parse(stored);
     }
 
     saveSettings(settings: AppSettings) {
