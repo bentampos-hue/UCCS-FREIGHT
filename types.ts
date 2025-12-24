@@ -3,7 +3,7 @@ export enum AppView {
   DASHBOARD = 'dashboard',
   SIMULATOR = 'simulator',
   VENDORS = 'vendors',
-  REPORTS = 'reports', // Now handles Shipments
+  REPORTS = 'reports',
   CRM = 'crm',
   ENQUIRY = 'enquiry',
   SETTINGS = 'settings',
@@ -18,9 +18,19 @@ export type Currency = 'USD' | 'EUR' | 'GBP' | 'CNY' | 'AED';
 export type QuoteStatus = 'SENT' | 'CONFIRMED' | 'LOST' | 'PENDING_APPROVAL' | 'RENEGOTIATE' | 'CANCELLED';
 export type EnquiryStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'BID_RECEIVED' | 'AWARDED' | 'CLOSED';
 export type ShipmentMilestoneStatus = 'BOOKING_CONFIRMED' | 'CARGO_PICKED_UP' | 'DEPARTED_POL' | 'AT_SEA' | 'ARRIVED_POD' | 'FLIGHT_DEPARTED' | 'FLIGHT_ARRIVED' | 'CUSTOMS_CLEARED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
-export type PackagingType = 'PALLET' | 'BOX' | 'CRATE' | 'LOOSE';
+export type PackagingType = 'PALLET' | 'BOX' | 'CRATE' | 'LOOSE' | 'CONTAINER';
 
-// --- Base Entities ---
+export interface PackagingLine {
+  id: string;
+  type: PackagingType;
+  quantity: number;
+  length: number;
+  width: number;
+  height: number;
+  weightPerUnit: number;
+  description: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -49,36 +59,12 @@ export interface Address {
   zip: string;
 }
 
-// --- Governance & Security ---
 export interface PortalToken {
   token: string;
   entityId: string;
   entityType: 'ENQUIRY' | 'QUOTE' | 'SHIPMENT';
   expiry: string;
   recipientEmail: string;
-}
-
-export interface ApprovalRequest {
-  id: string;
-  quoteId: string;
-  requestedBy: string;
-  requestedAt: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  reason: string;
-  marginAtRequest: number;
-  reviewedBy?: string;
-  reviewedAt?: string;
-}
-
-export interface AuditLog {
-  id: string;
-  timestamp: string;
-  userId: string;
-  userName: string;
-  action: string;
-  entityType: string;
-  entityId: string;
-  changes: string; // JSON string of diff
 }
 
 export interface ActivityLog {
@@ -89,7 +75,6 @@ export interface ActivityLog {
   description: string;
 }
 
-// --- Communication ---
 export interface CommunicationMessage {
   id: string;
   to: string;
@@ -101,7 +86,6 @@ export interface CommunicationMessage {
   referenceId: string;
 }
 
-// --- Logistics Entities ---
 export interface Milestone {
   status: ShipmentMilestoneStatus | string;
   date: string;
@@ -109,20 +93,6 @@ export interface Milestone {
   updatedBy: string;
   location?: string;
   isAutomated?: boolean;
-}
-
-export interface Shipment {
-  id: string;
-  quoteId: string;
-  customerId: string;
-  customerName: string;
-  trackingNumber: string; // AWB or Container No
-  modality: Modality;
-  origin: string;
-  destination: string;
-  status: 'BOOKED' | 'IN_TRANSIT' | 'ARRIVED' | 'CLEARED' | 'DELIVERED' | 'CANCELLED';
-  milestones: Milestone[];
-  createdAt: string;
 }
 
 export interface Quotation {
@@ -134,15 +104,17 @@ export interface Quotation {
   customerEmail: string;
   origin: string;
   destination: string;
+  originAddress?: string;
+  destinationAddress?: string;
   amount: number;
   buyRate: number;
   margin: number;
   currency: Currency;
   status: QuoteStatus;
   date: string;
-  trackingNumber?: string;
-  milestones?: Milestone[];
   cargoType?: string;
+  cargoLines?: PackagingLine[];
+  milestones?: Milestone[];
   details?: {
     weight?: number;
     volume?: number;
@@ -168,23 +140,21 @@ export interface VendorEnquiry {
   modality: Modality;
   reference: string;
   status: EnquiryStatus;
-  vendorsSentTo: string[]; // Vendor IDs
+  vendorsSentTo: string[];
   bids: VendorBid[];
   sentDate: string;
   origin: string;
   destination: string;
+  pickupZip?: string;
+  deliveryZip?: string;
   commodity: string;
+  cargoLines: PackagingLine[];
   incoterms?: string;
   readyDate?: string;
-  isHazmat?: boolean;
-  isStackable?: boolean;
-  equipmentType?: string;
-  equipmentCount?: number;
-  weight?: number;
-  volume?: number;
   currency?: Currency;
   targetRate?: number;
-  lastFollowUp?: string;
+  equipmentType?: string;
+  equipmentCount?: number;
 }
 
 export interface Vendor {
@@ -207,24 +177,15 @@ export interface Customer {
   notes?: string;
 }
 
-export interface PackagingDetail {
-  type: PackagingType;
-  quantity: number;
-  length?: number;
-  width?: number;
-  height?: number;
-  weight?: number;
-}
-
 export interface CommercialParameters {
   sea: {
     lclMinCbm: number;
-    wmRule: number; // e.g., 1000kg = 1cbm
+    wmRule: number;
     docFee: number;
     defaultLocalCharges: number;
   };
   air: {
-    volumetricFactor: number; // e.g., 6000
+    volumetricFactor: number;
     minChargeableWeight: number;
     defaultSurcharges: number;
   };
@@ -243,7 +204,10 @@ export interface QuoteRequest {
   modality: Modality;
   origin: string;
   destination: string;
+  originAddress?: string;
+  destinationAddress?: string;
   cargoType: string;
+  cargoLines?: PackagingLine[];
   weight?: number;
   volume?: number;
   etd?: string;
@@ -258,7 +222,6 @@ export interface QuoteRequest {
   sourceVendorId?: string;
 }
 
-// Updated SharedProps for RBAC
 export interface SharedProps {
   settings: AppSettings;
   userRole: UserRole;
@@ -266,4 +229,25 @@ export interface SharedProps {
   onNotify: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
   onLogActivity: (module: string, action: string, description: string) => void;
   onNavigate: (view: AppView) => void;
+}
+
+export interface Shipment {
+  id: string;
+  status: ShipmentMilestoneStatus;
+  milestones: Milestone[];
+}
+
+export interface ApprovalRequest {
+  id: string;
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  changes: string;
 }

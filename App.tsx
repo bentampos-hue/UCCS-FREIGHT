@@ -1,40 +1,12 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  LayoutDashboard, 
-  Ship, 
-  Users, 
-  FilePieChart, 
-  Settings as SettingsIcon, 
-  LogOut, 
-  Bell, 
-  Search,
-  Plus,
-  Zap,
-  CheckCircle2,
-  AlertCircle,
-  Info,
-  X,
-  Workflow,
-  Target,
-  FlaskConical,
-  ExternalLink,
-  User as UserIcon
+  LayoutDashboard, Ship, Users, FilePieChart, Settings as SettingsIcon, LogOut, 
+  Zap, Target, FlaskConical, ExternalLink, Workflow, CheckCircle2, Info
 } from 'lucide-react';
 
 import { 
-  AppView, 
-  User, 
-  AppSettings, 
-  Vendor, 
-  Customer, 
-  Quotation, 
-  VendorEnquiry, 
-  ActivityLog, 
-  QuoteStatus,
-  Milestone,
-  QuoteRequest,
-  VendorBid
+  AppView, User, AppSettings, Vendor, Customer, Quotation, VendorEnquiry, 
+  ActivityLog, QuoteRequest, VendorBid, Milestone
 } from './types';
 
 import { repo } from './services/repository';
@@ -60,7 +32,9 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<{id: string, type: string, message: string}[]>([]);
   const [portalToken, setPortalToken] = useState<string | null>(null);
   
-  // Fixed: Initializing AppSettings with mandatory commercialParameters to satisfy TypeScript.
+  // NEW: State to hold data transferred from Enquiry -> Simulator
+  const [simulationPreload, setSimulationPreload] = useState<QuoteRequest | null>(null); 
+
   const [settings, setSettings] = useState<AppSettings>({
     companyName: 'FreightFlow Global',
     defaultCurrency: 'USD',
@@ -149,16 +123,18 @@ const App: React.FC = () => {
     setCurrentView(AppView.DASHBOARD);
   };
 
+  // Bridge Enquiry -> Simulator
+  const handleLoadToSimulator = (req: QuoteRequest) => {
+    setSimulationPreload(req);
+    setCurrentView(AppView.SIMULATOR);
+    addNotification('success', 'Data loaded into Quote Engine');
+  };
+
   const updateVendors = async (v: Vendor) => {
     await repo.saveItem('vendors', v, currentUser!);
     setVendors(prev => {
       const idx = prev.findIndex(item => item.id === v.id);
-      if (idx > -1) {
-        const next = [...prev];
-        next[idx] = v;
-        return next;
-      }
-      return [...prev, v];
+      return idx > -1 ? prev.map(i => i.id === v.id ? v : i) : [...prev, v];
     });
     addNotification('success', `Vendor ${v.name} saved.`);
   };
@@ -167,12 +143,7 @@ const App: React.FC = () => {
     await repo.saveItem('customers', c, currentUser!);
     setCustomers(prev => {
       const idx = prev.findIndex(item => item.id === c.id);
-      if (idx > -1) {
-        const next = [...prev];
-        next[idx] = c;
-        return next;
-      }
-      return [...prev, c];
+      return idx > -1 ? prev.map(i => i.id === c.id ? c : i) : [...prev, c];
     });
     addNotification('success', `Customer ${c.companyName} saved.`);
   };
@@ -246,7 +217,6 @@ const App: React.FC = () => {
     onNavigate: setCurrentView
   };
 
-  // Simulation Logic
   const openPortalSim = (type: 'bid' | 'quote') => {
     let token = '';
     if (type === 'bid') {
@@ -287,7 +257,15 @@ const App: React.FC = () => {
           </div>
         );
       case AppView.SIMULATOR:
-        return <QuoteSimulator {...sharedProps} customers={customers} onGenerateQuote={handleGenerateQuote} />;
+        return (
+          <QuoteSimulator 
+            {...sharedProps} 
+            customers={customers} 
+            onGenerateQuote={handleGenerateQuote} 
+            prefillData={simulationPreload} 
+            onClearPrefill={() => setSimulationPreload(null)}
+          />
+        );
       case AppView.VENDORS:
         return <VendorNetwork {...sharedProps} vendors={vendors} onAddVendor={updateVendors} onUpdateVendor={updateVendors} />;
       case AppView.REPORTS:
@@ -320,9 +298,7 @@ const App: React.FC = () => {
               setEnquiries(prev => prev.map(item => item.id === e.id ? e : item));
             }}
             onAwardEnquiry={handleAwardEnquiry}
-            onLoadToSimulator={(req) => {
-              setCurrentView(AppView.SIMULATOR);
-            }}
+            onLoadToSimulator={handleLoadToSimulator}
           />
         );
       case AppView.SETTINGS:
@@ -350,7 +326,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans overflow-hidden">
-      {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-80' : 'w-24'} bg-slate-900 transition-all duration-500 flex flex-col relative z-50 shadow-2xl overflow-hidden shrink-0`}>
         <div className="p-8 flex items-center gap-4 border-b border-slate-800 relative z-10">
           <div className="bg-blue-600 p-3 rounded-2xl shadow-xl shadow-blue-500/20">
@@ -407,7 +382,6 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white border-b border-slate-200 px-10 py-6 flex justify-between items-center z-40 shrink-0">
           <div className="flex items-center gap-6">
@@ -433,7 +407,6 @@ const App: React.FC = () => {
           {renderView()}
         </div>
 
-        {/* Debug Simulation Bar */}
         <div className="h-12 bg-slate-900 border-t border-slate-800 flex items-center px-10 justify-between shrink-0 z-50">
            <div className="flex items-center gap-6">
               <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2 italic">
@@ -448,7 +421,6 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Notifications */}
       <div className="fixed bottom-16 right-10 z-[100] flex flex-col gap-4 pointer-events-none">
         {notifications.map(n => (
           <div key={n.id} className={`pointer-events-auto min-w-[320px] p-6 rounded-[2rem] shadow-2xl border flex items-start gap-4 animate-fade-in ${
