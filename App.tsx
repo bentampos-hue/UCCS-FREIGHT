@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Ship, Users, FilePieChart, Settings as SettingsIcon, LogOut, 
-  Zap, Target, FlaskConical, ExternalLink, Workflow, CheckCircle2, Info
+  Zap, Target, FlaskConical, ExternalLink, Workflow, CheckCircle2, Info, ShieldAlert, ListFilter, ClipboardList
 } from 'lucide-react';
 
 import { 
   AppView, User, AppSettings, Vendor, Customer, Quotation, VendorEnquiry, 
-  ActivityLog, QuoteRequest, VendorBid, Milestone
+  ActivityLog, QuoteRequest, VendorBid, Milestone, WorkflowContext, Shipment
 } from './types';
 
 import { repo } from './services/repository';
@@ -23,6 +23,9 @@ import Settings from './components/Settings';
 import WorkflowVisualizer from './components/WorkflowVisualizer';
 import VendorBidPortal from './components/VendorBidPortal';
 import CustomerQuotePortal from './components/CustomerQuotePortal';
+import CustomerTrackingPortal from './components/CustomerTrackingPortal';
+import ApprovalsInbox from './components/ApprovalsInbox';
+import AuditViewer from './components/AuditViewer';
 
 const App: React.FC = () => {
   // --- Global State ---
@@ -32,8 +35,15 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<{id: string, type: string, message: string}[]>([]);
   const [portalToken, setPortalToken] = useState<string | null>(null);
   
-  // NEW: State to hold data transferred from Enquiry -> Simulator
-  const [simulationPreload, setSimulationPreload] = useState<QuoteRequest | null>(null); 
+  // PRODUCTION: Persisted Workflow Context
+  const [workflowContext, setWorkflowContext] = useState<WorkflowContext>(() => {
+    const saved = sessionStorage.getItem('uccs_workflow_context');
+    return saved ? JSON.parse(saved) : { sourceType: null, sourceId: null, payload: null };
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('uccs_workflow_context', JSON.stringify(workflowContext));
+  }, [workflowContext]);
 
   const [settings, setSettings] = useState<AppSettings>({
     companyName: 'FreightFlow Global',
@@ -51,7 +61,7 @@ const App: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [enquiries, setEnquiries] = useState<VendorEnquiry[]>([]);
-  const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
   // --- Initialization ---
@@ -60,12 +70,13 @@ const App: React.FC = () => {
       const loadedSettings = repo.getSettings(settings);
       setSettings(loadedSettings);
 
-      const [v, c, q, e, u] = await Promise.all([
+      const [v, c, q, e, u, s] = await Promise.all([
         repo.getVendors(),
         repo.getCustomers(),
         repo.getQuotes(),
         repo.getEnquiries(),
-        repo.getUsers()
+        repo.getUsers(),
+        repo.getShipments()
       ]);
 
       if (u.length === 0) {
@@ -80,10 +91,10 @@ const App: React.FC = () => {
       setCustomers(c);
       setQuotations(q);
       setEnquiries(e);
+      setShipments(s);
     };
     init();
 
-    // Check URL for portal access simulation
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const type = params.get('type');
@@ -91,6 +102,7 @@ const App: React.FC = () => {
        setPortalToken(token);
        if (type === 'bid') setCurrentView(AppView.VENDOR_PORTAL);
        if (type === 'quote') setCurrentView(AppView.CUSTOMER_PORTAL);
+       if (type === 'track') setCurrentView(AppView.TRACKING_PORTAL);
     }
   }, []);
 
@@ -109,103 +121,51 @@ const App: React.FC = () => {
       action,
       description
     };
-    setActivityLog(prev => [log, ...prev].slice(0, 50));
-  };
-
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    addNotification('success', `Welcome back, ${user.name}`);
-    logActivity('Auth', 'Login', `${user.name} authenticated into ${user.role} role.`);
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentView(AppView.DASHBOARD);
-  };
-
-  // Bridge Enquiry -> Simulator
-  const handleLoadToSimulator = (req: QuoteRequest) => {
-    setSimulationPreload(req);
-    setCurrentView(AppView.SIMULATOR);
-    addNotification('success', 'Data loaded into Quote Engine');
-  };
-
-  const updateVendors = async (v: Vendor) => {
-    await repo.saveItem('vendors', v, currentUser!);
-    setVendors(prev => {
-      const idx = prev.findIndex(item => item.id === v.id);
-      return idx > -1 ? prev.map(i => i.id === v.id ? v : i) : [...prev, v];
+    // Note: Activity logs are handled via repo audit logs for persistence
+    repo.addAuditLog({
+        id: log.id,
+        timestamp: log.timestamp,
+        userId: currentUser?.id || 'SYSTEM',
+        userName: currentUser?.name || 'System',
+        action,
+        entityType: module,
+        entityId: 'GENERIC',
+        changes: description
     });
-    addNotification('success', `Vendor ${v.name} saved.`);
   };
 
-  const updateCustomers = async (c: Customer) => {
-    await repo.saveItem('customers', c, currentUser!);
-    setCustomers(prev => {
-      const idx = prev.findIndex(item => item.id === c.id);
-      return idx > -1 ? prev.map(i => i.id === c.id ? c : i) : [...prev, c];
-    });
-    addNotification('success', `Customer ${c.companyName} saved.`);
-  };
+  const handleConfirmQuote = async (quoteId: string) => {
+    const q = quotations.find(item => item.id === quoteId);
+    if (!q) return;
 
-  const handleGenerateQuote = async (q: Quotation) => {
-    setQuotations(prev => [q, ...prev]);
-    logActivity('Quoting', 'Generated', `New quote ${q.id} generated for ${q.customerName}`);
-  };
-
-  const handleAddEnquiry = async (e: VendorEnquiry) => {
-    await repo.saveItem('enquiries', e, currentUser!);
-    setEnquiries(prev => [e, ...prev]);
-    logActivity('Procurement', 'Enquiry', `Market intake started for ${e.origin} to ${e.destination}`);
-  };
-
-  const handleAwardEnquiry = async (enquiryId: string, bid: VendorBid, sellPrice: number) => {
-    const enquiry = enquiries.find(e => e.id === enquiryId);
-    if (!enquiry) return;
-
-    const newQuote: Quotation = {
-      id: `Q-AWARD-${Date.now().toString().slice(-4)}`,
-      portalToken: Math.random().toString(36).substr(2, 12),
-      modality: enquiry.modality,
-      customerId: 'C-SPOT',
-      customerName: 'Spot Market Client',
-      customerEmail: 'pending@client.com',
-      origin: enquiry.origin,
-      destination: enquiry.destination,
-      amount: sellPrice,
-      buyRate: bid.amount,
-      margin: sellPrice - bid.amount,
-      currency: bid.currency,
-      status: 'SENT',
-      date: new Date().toISOString().split('T')[0],
+    const confirmedQuote: Quotation = { ...q, status: 'CONFIRMED' as const };
+    const trackingToken = Math.random().toString(36).substr(2, 12); // Token generation in trackService later
+    
+    const newShipment: Shipment = {
+      id: `SHP-${quoteId.split('-')[1]}`,
+      quoteId: q.id,
+      trackingToken,
+      status: 'BOOKING_CONFIRMED',
+      modality: q.modality,
+      customerName: q.customerName,
+      origin: q.origin,
+      destination: q.destination,
+      cargoLines: q.cargoLines || [],
+      documents: [],
       milestones: [{
         status: 'BOOKING_CONFIRMED',
         date: new Date().toISOString(),
-        notes: `Awarded to ${bid.vendorName} on spot market intake.`,
+        notes: 'Shipment created from authorized quotation.',
         updatedBy: currentUser?.name || 'System'
       }]
     };
 
-    await repo.saveQuote(newQuote, currentUser!);
-    setQuotations(prev => [newQuote, ...prev]);
+    await repo.saveQuote(confirmedQuote, currentUser!);
+    await repo.saveShipment(newShipment, currentUser!);
     
-    const updatedEnquiry = { ...enquiry, status: 'AWARDED' as const };
-    await repo.saveItem('enquiries', updatedEnquiry, currentUser!);
-    setEnquiries(prev => prev.map(e => e.id === enquiryId ? updatedEnquiry : e));
-
-    addNotification('success', `Awarding ${bid.vendorName}. Quote dispatched to Spot Client.`);
-    setCurrentView(AppView.REPORTS);
-  };
-
-  const handleAddMilestone = async (id: string, milestone: Milestone) => {
-    const quote = quotations.find(q => q.id === id);
-    if (!quote) return;
-    const updatedQuote = { 
-      ...quote, 
-      milestones: [milestone, ...(quote.milestones || [])] 
-    };
-    await repo.saveQuote(updatedQuote, currentUser!);
-    setQuotations(prev => prev.map(q => q.id === id ? updatedQuote : q));
+    setQuotations(prev => prev.map(item => item.id === quoteId ? confirmedQuote : item));
+    setShipments(prev => [newShipment, ...prev]);
+    addNotification('success', `Quote ${quoteId} confirmed. Shipment ${newShipment.id} initialized.`);
   };
 
   const sharedProps = {
@@ -217,19 +177,9 @@ const App: React.FC = () => {
     onNavigate: setCurrentView
   };
 
-  const openPortalSim = (type: 'bid' | 'quote') => {
-    let token = '';
-    if (type === 'bid') {
-      token = enquiries[0]?.portalToken || '';
-      if (!token) { addNotification('warning', 'Create an Enquiry first to test Bid Portal.'); return; }
-    } else {
-      token = quotations[0]?.portalToken || '';
-      if (!token) { addNotification('warning', 'Generate a Quote first to test Customer Portal.'); return; }
-    }
-    setPortalToken(token);
-    setCurrentView(type === 'bid' ? AppView.VENDOR_PORTAL : AppView.CUSTOMER_PORTAL);
-  };
-
+  if (currentView === AppView.TRACKING_PORTAL && portalToken) {
+    return <div className="animate-fade-in"><CustomerTrackingPortal token={portalToken} /><SimulationBar onExit={() => setCurrentView(AppView.DASHBOARD)} /></div>;
+  }
   if (currentView === AppView.VENDOR_PORTAL && portalToken) {
     return <div className="animate-fade-in"><VendorBidPortal token={portalToken} /><SimulationBar onExit={() => setCurrentView(AppView.DASHBOARD)} /></div>;
   }
@@ -238,7 +188,7 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
-    return <Login onLogin={handleLogin} users={users} />;
+    return <Login onLogin={setCurrentUser} users={users} />;
   }
 
   const renderView = () => {
@@ -248,10 +198,10 @@ const App: React.FC = () => {
           <div className="space-y-8 animate-fade-in">
             <Dashboard 
               {...sharedProps} 
-              activityLog={activityLog} 
+              activityLog={[]} 
               quotations={quotations} 
               enquiries={enquiries}
-              onNavigateToReports={(f) => { setCurrentView(AppView.REPORTS); }}
+              onNavigateToReports={() => setCurrentView(AppView.REPORTS)}
             />
             <WorkflowVisualizer {...sharedProps} />
           </div>
@@ -261,62 +211,94 @@ const App: React.FC = () => {
           <QuoteSimulator 
             {...sharedProps} 
             customers={customers} 
-            onGenerateQuote={handleGenerateQuote} 
-            prefillData={simulationPreload} 
-            onClearPrefill={() => setSimulationPreload(null)}
+            onGenerateQuote={(q) => {
+                setQuotations([q, ...quotations]);
+                setCurrentView(AppView.REPORTS);
+            }} 
+            prefillData={workflowContext.payload} 
+            onClearPrefill={() => setWorkflowContext({ sourceType: null, sourceId: null, payload: null })}
+          />
+        );
+      case AppView.APPROVALS:
+        return (
+          <ApprovalsInbox 
+            {...sharedProps} 
+            quotations={quotations} 
+            onApprove={async (id) => {
+                const q = quotations.find(x => x.id === id);
+                if (!q) return;
+                const updated = { ...q, status: 'SENT' as const };
+                await repo.saveQuote(updated, currentUser);
+                setQuotations(prev => prev.map(x => x.id === id ? updated : x));
+                addNotification('success', 'Quote authorized for dispatch.');
+            }}
+            onReject={async (id, msg) => {
+                const q = quotations.find(x => x.id === id);
+                if (!q) return;
+                const updated = { ...q, status: 'RENEGOTIATE' as const, approvalComments: msg };
+                await repo.saveQuote(updated, currentUser);
+                setQuotations(prev => prev.map(x => x.id === id ? updated : x));
+                addNotification('warning', 'Quote returned to sales for revision.');
+            }}
           />
         );
       case AppView.VENDORS:
-        return <VendorNetwork {...sharedProps} vendors={vendors} onAddVendor={updateVendors} onUpdateVendor={updateVendors} />;
+        return <VendorNetwork {...sharedProps} vendors={vendors} onAddVendor={(v) => setVendors([v, ...vendors])} onUpdateVendor={(v) => setVendors(prev => prev.map(x => x.id === v.id ? v : x))} />;
       case AppView.REPORTS:
         return (
           <Reports 
             {...sharedProps} 
+            enquiries={enquiries}
             quotations={quotations} 
             onUpdateStatus={async (id, s) => {
-              const q = quotations.find(item => item.id === id);
-              if (q) {
-                const updated = { ...q, status: s };
-                await repo.saveQuote(updated, currentUser);
-                setQuotations(prev => prev.map(item => item.id === id ? updated : item));
+              if (s === 'CONFIRMED') {
+                handleConfirmQuote(id);
+              } else {
+                const q = quotations.find(item => item.id === id);
+                if (q) {
+                  const updated = { ...q, status: s };
+                  await repo.saveQuote(updated, currentUser);
+                  setQuotations(prev => prev.map(item => item.id === id ? updated : item));
+                }
               }
             }}
-            onAddMilestone={handleAddMilestone}
+            onAddMilestone={async (id, m) => {
+                const q = quotations.find(x => x.id === id);
+                if (q) {
+                    const updated = { ...q, milestones: [m, ...(q.milestones || [])] };
+                    await repo.saveQuote(updated, currentUser);
+                    setQuotations(prev => prev.map(item => item.id === id ? updated : item));
+                }
+            }}
           />
         );
       case AppView.CRM:
-        return <CRM {...sharedProps} customers={customers} onAddCustomer={updateCustomers} onUpdateCustomer={updateCustomers} />;
+        return <CRM {...sharedProps} customers={customers} onAddCustomer={(c) => setCustomers([c, ...customers])} onUpdateCustomer={(c) => setCustomers(prev => prev.map(x => x.id === c.id ? c : x))} />;
       case AppView.ENQUIRY:
         return (
           <VendorEnquiryComponent 
             {...sharedProps} 
             vendors={vendors} 
             enquiries={enquiries} 
-            onAddEnquiry={handleAddEnquiry}
-            onUpdateEnquiry={async (e) => {
-              await repo.saveItem('enquiries', e, currentUser);
-              setEnquiries(prev => prev.map(item => item.id === e.id ? e : item));
+            onAddEnquiry={(e) => setEnquiries([e, ...enquiries])}
+            onUpdateEnquiry={(e) => setEnquiries(prev => prev.map(x => x.id === e.id ? e : x))}
+            onAwardEnquiry={async () => {}}
+            onLoadToSimulator={(req) => {
+                setWorkflowContext({ sourceType: 'ENQUIRY', sourceId: req.sourceEnquiryId || null, payload: req });
+                setCurrentView(AppView.SIMULATOR);
             }}
-            onAwardEnquiry={handleAwardEnquiry}
-            onLoadToSimulator={handleLoadToSimulator}
           />
         );
+      case AppView.AUDIT:
+        return <AuditViewer {...sharedProps} />;
       case AppView.SETTINGS:
         return (
           <Settings 
             {...sharedProps} 
-            onUpdateSettings={(s) => {
-              repo.saveSettings(s);
-              setSettings(s);
-            }}
+            onUpdateSettings={setSettings}
             users={users}
-            onAddUser={async (u) => {
-              await repo.saveItem('users', u, currentUser);
-              setUsers(prev => [...prev, u]);
-            }}
-            onDeleteUser={async (id) => {
-              setUsers(prev => prev.filter(u => u.id !== id));
-            }}
+            onAddUser={(u) => setUsers([...users, u])}
+            onDeleteUser={(id) => setUsers(users.filter(x => x.id !== id))}
           />
         );
       default:
@@ -334,20 +316,22 @@ const App: React.FC = () => {
           {isSidebarOpen && (
             <div className="animate-fade-in">
               <h1 className="text-xl font-black text-white tracking-tighter uppercase italic">FreightFlow</h1>
-              <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Control Center</p>
+              <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest text-center">Enterprise Hub</p>
             </div>
           )}
         </div>
 
-        <nav className="flex-1 p-6 space-y-2 relative z-10">
+        <nav className="flex-1 p-6 space-y-2 relative z-10 overflow-y-auto custom-scrollbar">
           {[
-            { id: AppView.DASHBOARD, label: 'Control Pulse', icon: LayoutDashboard },
-            { id: AppView.ENQUIRY, label: 'Market Intake', icon: Zap },
-            { id: AppView.SIMULATOR, label: 'Quote Engine', icon: Target },
-            { id: AppView.REPORTS, label: 'Live Ledger', icon: FilePieChart },
-            { id: AppView.CRM, label: 'Corporate CRM', icon: Users },
-            { id: AppView.VENDORS, label: 'Vendor Grid', icon: Ship },
-          ].map(item => (
+            { id: AppView.DASHBOARD, label: 'Pulse Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'SALES', 'OPS'] },
+            { id: AppView.ENQUIRY, label: 'Market Intake', icon: Zap, roles: ['ADMIN', 'MANAGER', 'SALES'] },
+            { id: AppView.SIMULATOR, label: 'Quote Engine', icon: Target, roles: ['ADMIN', 'MANAGER', 'SALES'] },
+            { id: AppView.APPROVALS, label: 'Approvals', icon: ShieldAlert, roles: ['ADMIN', 'MANAGER'] },
+            { id: AppView.REPORTS, label: 'Live Ledger', icon: FilePieChart, roles: ['ADMIN', 'MANAGER', 'SALES', 'OPS'] },
+            { id: AppView.CRM, label: 'Corporate CRM', icon: Users, roles: ['ADMIN', 'MANAGER', 'SALES'] },
+            { id: AppView.VENDORS, label: 'Vendor Grid', icon: Ship, roles: ['ADMIN', 'MANAGER', 'SALES', 'OPS'] },
+            { id: AppView.AUDIT, label: 'Audit Vault', icon: ClipboardList, roles: ['ADMIN'] },
+          ].filter(item => item.roles.includes(currentUser.role)).map(item => (
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
@@ -357,27 +341,20 @@ const App: React.FC = () => {
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <item.icon size={20} className={currentView === item.id ? 'animate-pulse' : 'group-hover:scale-110 transition-transform'} />
+              <item.icon size={20} />
               {isSidebarOpen && <span className="text-[12px] uppercase tracking-widest">{item.label}</span>}
             </button>
           ))}
         </nav>
 
         <div className="p-6 border-t border-slate-800 relative z-10 space-y-2">
-          <button onClick={() => openPortalSim('bid')} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-blue-400 text-[10px] font-black uppercase tracking-widest transition-all italic">
-            <FlaskConical size={14} /> {isSidebarOpen && "Simulate Vendor"}
-          </button>
-          <button onClick={() => openPortalSim('quote')} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-emerald-400 text-[10px] font-black uppercase tracking-widest transition-all italic">
-            <ExternalLink size={14} /> {isSidebarOpen && "Simulate Client"}
-          </button>
-          <div className="h-px bg-slate-800 my-4"></div>
           <button onClick={() => setCurrentView(AppView.SETTINGS)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all ${currentView === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
             <SettingsIcon size={20} />
             {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Settings</span>}
           </button>
-          <button onClick={handleLogout} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:bg-red-500 hover:text-white transition-all group">
-            <LogOut size={20} className="group-hover:translate-x-1 transition-transform" />
-            {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Exit Portal</span>}
+          <button onClick={() => setCurrentUser(null)} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:bg-red-500 hover:text-white transition-all group">
+            <LogOut size={20} />
+            {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Log Out</span>}
           </button>
         </div>
       </aside>
@@ -408,16 +385,10 @@ const App: React.FC = () => {
         </div>
 
         <div className="h-12 bg-slate-900 border-t border-slate-800 flex items-center px-10 justify-between shrink-0 z-50">
-           <div className="flex items-center gap-6">
-              <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2 italic">
-                <FlaskConical size={12} className="text-blue-500"/> Simulation Environment
-              </span>
-              <div className="flex gap-2">
-                 <button onClick={() => openPortalSim('bid')} className="text-[8px] font-black text-blue-400 border border-blue-900 px-3 py-1 rounded hover:bg-blue-900 transition-colors italic uppercase tracking-widest">Portal: Vendor Bid</button>
-                 <button onClick={() => openPortalSim('quote')} className="text-[8px] font-black text-emerald-400 border border-emerald-900 px-3 py-1 rounded hover:bg-emerald-900 transition-colors italic uppercase tracking-widest">Portal: Client Accept</button>
-              </div>
+           <div className="flex items-center gap-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] italic">
+             System Status: Production Online • All Channels Encrypted
            </div>
-           <div className="text-[9px] font-bold text-slate-600 italic">Connected to Global Node • Latency: 4ms</div>
+           <div className="text-[9px] font-bold text-slate-600 italic">Unique CCS Automation Gateway v3.5.0</div>
         </div>
       </main>
 
@@ -429,15 +400,8 @@ const App: React.FC = () => {
             n.type === 'warning' ? 'bg-amber-900 border-amber-800 text-amber-50' :
             'bg-slate-900 border-slate-800 text-slate-50'
           }`}>
-            <div className={`p-2 rounded-xl ${
-               n.type === 'success' ? 'bg-emerald-800 text-emerald-400' :
-               n.type === 'error' ? 'bg-red-800 text-red-400' :
-               n.type === 'warning' ? 'bg-amber-800 text-amber-400' :
-               'bg-slate-800 text-blue-400'
-            }`}>
-              {n.type === 'success' ? <CheckCircle2 size={20}/> : <Info size={20}/>}
-            </div>
-            <div className="flex-1 pt-0.5">
+            <div className="pt-0.5"><Info size={20}/></div>
+            <div className="flex-1">
                <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-50 italic">{n.type}</p>
                <p className="text-sm font-bold tracking-tight">{n.message}</p>
             </div>
@@ -452,7 +416,7 @@ const SimulationBar: React.FC<{ onExit: () => void }> = ({ onExit }) => (
   <div className="fixed bottom-0 left-0 w-full bg-blue-600 text-white px-10 py-3 flex justify-between items-center z-[200] animate-fade-in italic">
     <div className="flex items-center gap-4">
       <FlaskConical size={18} className="animate-pulse" />
-      <span className="text-[10px] font-black uppercase tracking-[0.2em]">Viewing External Stakeholder Portal Experience</span>
+      <span className="text-[10px] font-black uppercase tracking-[0.2em]">External Stakeholder Viewing Experience</span>
     </div>
     <button onClick={onExit} className="bg-white text-blue-600 px-6 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
       Return to Master Control

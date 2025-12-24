@@ -8,8 +8,10 @@ export enum AppView {
   ENQUIRY = 'enquiry',
   SETTINGS = 'settings',
   APPROVALS = 'approvals',
+  AUDIT = 'audit',
   VENDOR_PORTAL = 'vendor_portal',
-  CUSTOMER_PORTAL = 'customer_portal'
+  CUSTOMER_PORTAL = 'customer_portal',
+  TRACKING_PORTAL = 'tracking_portal'
 }
 
 export type UserRole = 'ADMIN' | 'MANAGER' | 'SALES' | 'OPS';
@@ -19,6 +21,12 @@ export type QuoteStatus = 'SENT' | 'CONFIRMED' | 'LOST' | 'PENDING_APPROVAL' | '
 export type EnquiryStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'BID_RECEIVED' | 'AWARDED' | 'CLOSED';
 export type ShipmentMilestoneStatus = 'BOOKING_CONFIRMED' | 'CARGO_PICKED_UP' | 'DEPARTED_POL' | 'AT_SEA' | 'ARRIVED_POD' | 'FLIGHT_DEPARTED' | 'FLIGHT_ARRIVED' | 'CUSTOMS_CLEARED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
 export type PackagingType = 'PALLET' | 'BOX' | 'CRATE' | 'LOOSE' | 'CONTAINER';
+
+export interface DraftState {
+  formId: string;
+  data: any;
+  lastSaved: string;
+}
 
 export interface PackagingLine {
   id: string;
@@ -65,6 +73,7 @@ export interface PortalToken {
   entityType: 'ENQUIRY' | 'QUOTE' | 'SHIPMENT';
   expiry: string;
   recipientEmail: string;
+  createdAt: string;
 }
 
 export interface ActivityLog {
@@ -97,7 +106,8 @@ export interface Milestone {
 
 export interface Quotation {
   id: string;
-  portalToken: string;
+  portalToken?: string;
+  isManual?: boolean;
   modality: Modality;
   customerId: string;
   customerName: string;
@@ -115,12 +125,33 @@ export interface Quotation {
   cargoType?: string;
   cargoLines?: PackagingLine[];
   milestones?: Milestone[];
+  sourceEnquiryId?: string;
+  sourceBidId?: string;
+  linkedJobId?: string;
+  approvalComments?: string;
   details?: {
     weight?: number;
     volume?: number;
     chargeable?: number;
     equipment?: string;
   };
+}
+
+export interface Shipment {
+  id: string;
+  quoteId: string;
+  trackingToken: string;
+  status: ShipmentMilestoneStatus;
+  modality: Modality;
+  customerName: string;
+  origin: string;
+  destination: string;
+  milestones: Milestone[];
+  cargoLines: PackagingLine[];
+  documents: { id: string; name: string; type: string; url: string; uploadedAt: string }[];
+  hblReference?: string;
+  mblReference?: string;
+  containerNumber?: string;
 }
 
 export interface VendorBid {
@@ -220,6 +251,13 @@ export interface QuoteRequest {
   sourceRef?: string;
   sourceVendor?: string;
   sourceVendorId?: string;
+  sourceEnquiryId?: string;
+}
+
+export interface WorkflowContext {
+  sourceType: 'ENQUIRY' | 'CLONE' | null;
+  sourceId: string | null;
+  payload: QuoteRequest | null;
 }
 
 export interface SharedProps {
@@ -231,14 +269,13 @@ export interface SharedProps {
   onNavigate: (view: AppView) => void;
 }
 
-export interface Shipment {
-  id: string;
-  status: ShipmentMilestoneStatus;
-  milestones: Milestone[];
-}
-
 export interface ApprovalRequest {
   id: string;
+  quoteId: string;
+  requestedBy: string;
+  requestedAt: string;
+  margin: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 export interface AuditLog {

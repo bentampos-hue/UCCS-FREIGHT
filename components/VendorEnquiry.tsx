@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Send, Globe, Anchor, Plus, Check, CheckCircle, ExternalLink, X, Mail, Eye, ArrowRight, Trophy, BarChart3, ChevronDown, Calendar, Package, Copy, Link as LinkIcon, Inbox, Edit3, MessageSquareText, Users, Zap, Plane, Ship, AlertTriangle, TrendingUp, BellRing, Loader2, Calculator, Save, FlaskConical, Trash2, MapPin, PackagePlus } from 'lucide-react';
+import { Send, Globe, Anchor, Plus, Check, CheckCircle, ExternalLink, X, Mail, Eye, ArrowRight, Trophy, BarChart3, ChevronDown, Calendar, Package, Copy, Link as LinkIcon, Inbox, Edit3, MessageSquareText, Users, Zap, Plane, Ship, AlertTriangle, TrendingUp, BellRing, Loader2, Calculator, Save, FlaskConical, Trash2, MapPin, PackagePlus, ChevronRight } from 'lucide-react';
 import { Vendor, VendorEnquiry, VendorBid, EnquiryStatus, Currency, SharedProps, QuoteRequest, Modality, PackagingType, PackagingLine } from '../types';
 import { repo } from '../services/repository';
 
@@ -11,6 +11,25 @@ interface VendorEnquiryProps extends SharedProps {
   onAwardEnquiry: (enquiryId: string, bid: VendorBid, sellPrice: number) => void;
   onLoadToSimulator: (data: QuoteRequest) => void;
 }
+
+const WorkflowBreadcrumb: React.FC<{ activeStep: number }> = ({ activeStep }) => (
+  <div className="flex items-center gap-4 px-10 mb-8 animate-fade-in">
+    <div className="flex items-center gap-2">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>1</span>
+      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 1 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Market Intake</span>
+    </div>
+    <ChevronRight size={14} className="text-slate-300" />
+    <div className="flex items-center gap-2">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 2 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>2</span>
+      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 2 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Quote Generation</span>
+    </div>
+    <ChevronRight size={14} className="text-slate-300" />
+    <div className="flex items-center gap-2">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 3 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>3</span>
+      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 3 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Job Execution</span>
+    </div>
+  </div>
+);
 
 const getStatusBadge = (status: EnquiryStatus) => {
   const styles: Record<EnquiryStatus, string> = {
@@ -184,13 +203,16 @@ Global Logistics Node`;
         lineItems: [{ description: 'Base Freight', amount: bid.amount, quantity: 1 }],
         sourceRef: enquiry.reference,
         sourceVendor: bid.vendorName,
-        sourceVendorId: bid.vendorId
+        sourceVendorId: bid.vendorId,
+        sourceEnquiryId: enquiry.id
     });
     onNotify('success', 'Bid exported to Quote Engine.');
   };
 
   return (
     <div className="space-y-6 animate-fade-in relative pb-20">
+        <WorkflowBreadcrumb activeStep={1} />
+
         <div className="bg-slate-900 text-white p-12 rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-10 relative overflow-hidden border-b-[16px] border-blue-600">
             <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Globe size={280} /></div>
             <div className="z-10">

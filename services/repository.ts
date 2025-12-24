@@ -1,3 +1,4 @@
+
 import { Vendor, Customer, Quotation, VendorEnquiry, ActivityLog, AppSettings, User, Shipment, CommunicationMessage, ApprovalRequest, AuditLog, CommercialParameters } from '../types';
 import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc } from './firebase';
 
@@ -82,6 +83,8 @@ class Repository {
     async getUsers() { return this.loadCollection<User>('users'); }
     async getVendors() { return this.loadCollection<Vendor>('vendors'); }
     async getCustomers() { return this.loadCollection<Customer>('customers'); }
+    // Added: Missing method to retrieve audit logs, fixing error in AuditViewer.tsx
+    async getAuditLogs() { return this.loadCollection<AuditLog>('audit_logs'); }
 
     async saveQuote(quote: Quotation, user: User) { return this.saveItem('quotations', quote, user); }
     async saveShipment(ship: Shipment, user: User) { return this.saveItem('shipments', ship, user); }
