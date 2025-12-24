@@ -7,7 +7,7 @@
 // 4. The app will automatically detect the keys and switch from LocalStorage to Google Cloud.
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, collection, getDocs, setDoc, doc, Timestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, setDoc, doc, Timestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // REPLACE THESE WITH YOUR GOOGLE FIREBASE KEYS
 const firebaseConfig = {
@@ -37,4 +37,4 @@ if (firebaseConfig.apiKey) {
     console.log("⚠️ No Google Keys found. Using Browser LocalStorage.");
 }
 
-export { db, isFirebaseActive, collection, getDocs, setDoc, doc, Timestamp };
+export { db, isFirebaseActive, collection, getDocs, setDoc, doc, Timestamp, deleteDoc };

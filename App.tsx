@@ -1,473 +1,451 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Network, Calculator, Users, Ship, Menu, X, FileBarChart, LogOut, Briefcase, Megaphone, Settings as SettingsIcon, Bell, XCircle, CheckCircle, Info, AlertTriangle, Shield, Cloud, Database } from 'lucide-react';
-import { AppView, Quotation, QuoteStatus, Vendor, Customer, AppSettings, SystemNotification, ActivityLog, SharedProps, VendorEnquiry, VendorBid, User, UserRole, Milestone, ShipmentMilestoneStatus, QuoteRequest } from './types';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  LayoutDashboard, 
+  Ship, 
+  Users, 
+  FilePieChart, 
+  Settings as SettingsIcon, 
+  LogOut, 
+  Bell, 
+  Search,
+  Plus,
+  Zap,
+  CheckCircle2,
+  AlertCircle,
+  Info,
+  X,
+  Workflow,
+  Target
+} from 'lucide-react';
+
+import { 
+  AppView, 
+  User, 
+  AppSettings, 
+  Vendor, 
+  Customer, 
+  Quotation, 
+  VendorEnquiry, 
+  ActivityLog, 
+  QuoteStatus,
+  Milestone,
+  QuoteRequest,
+  VendorBid
+} from './types';
+
+import { repo } from './services/repository';
+
+// Components
+import Login from './components/Login';
 import Dashboard from './components/Dashboard';
-import WorkflowVisualizer from './components/WorkflowVisualizer';
 import QuoteSimulator from './components/QuoteSimulator';
 import VendorNetwork from './components/VendorNetwork';
 import Reports from './components/Reports';
-import Login from './components/Login';
 import CRM from './components/CRM';
 import VendorEnquiryComponent from './components/VendorEnquiry';
 import Settings from './components/Settings';
-import { repo } from './services/repository';
+import WorkflowVisualizer from './components/WorkflowVisualizer';
 
 const App: React.FC = () => {
+  // --- Global State ---
+  const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<AppView>(AppView.DASHBOARD);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [storageType, setStorageType] = useState<'LOCAL' | 'CLOUD'>('LOCAL');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [notifications, setNotifications] = useState<{id: string, type: string, message: string}[]>([]);
   
-  // Navigation State
-  const [reportsFilter, setReportsFilter] = useState<QuoteStatus | 'ALL'>('ALL');
-  const [simulationPreload, setSimulationPreload] = useState<QuoteRequest | null>(null);
+  const [settings, setSettings] = useState<AppSettings>({
+    companyName: 'FreightFlow Global',
+    defaultCurrency: 'USD',
+    defaultMarginPercent: 15,
+    emailSignature: 'Best Regards,\nFreightFlow Logistics Team'
+  });
 
   // --- Data State ---
-  const [users, setUsers] = useState<User[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [enquiries, setEnquiries] = useState<VendorEnquiry[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
 
-  const [settings, setSettings] = useState<AppSettings>({
-    companyName: 'Unique CCS',
-    defaultCurrency: 'USD',
-    defaultMarginPercent: 20,
-    emailSignature: 'Best Regards,\nUnique CCS Team',
-    enableNotifications: true,
-    themeColor: 'blue',
-    emailProvider: 'OFFICE365'
-  });
-
-  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
-
-  // --- INITIAL DATA LOAD ---
+  // --- Initialization ---
   useEffect(() => {
-    const loadData = async () => {
-        try {
-            setUsers(await repo.getUsers());
-            setVendors(await repo.getVendors());
-            setCustomers(await repo.getCustomers());
-            setQuotations(await repo.getQuotes());
-            setEnquiries(await repo.getEnquiries());
-            setActivityLog(await repo.getLogs());
-            setSettings(repo.getSettings(settings));
-            setStorageType(repo.getStorageType());
-        } catch (e) {
-            console.error("Data Load Error:", e);
-            addNotification('error', 'Failed to load data from repository.');
-        } finally {
-            setIsDataLoaded(true);
-        }
+    const init = async () => {
+      const loadedSettings = repo.getSettings(settings);
+      setSettings(loadedSettings);
+
+      const [v, c, q, e, u] = await Promise.all([
+        repo.getVendors(),
+        repo.getCustomers(),
+        repo.getQuotes(),
+        repo.getEnquiries(),
+        repo.getUsers()
+      ]);
+
+      // Seed default admin if none exists
+      if (u.length === 0) {
+        const admin: User = { id: 'U001', name: 'Admin User', email: 'admin@uniqueccs.com', role: 'ADMIN', password: 'admin123' };
+        await repo.saveItem('users', admin, admin);
+        setUsers([admin]);
+      } else {
+        setUsers(u);
+      }
+
+      setVendors(v);
+      setCustomers(c);
+      setQuotations(q);
+      setEnquiries(e);
     };
-    loadData();
+    init();
   }, []);
 
-  const persistUsers = (data: User[]) => {
-      setUsers(data);
-      repo.saveUsers(data);
-  };
-  const persistVendors = (data: Vendor[]) => {
-      setVendors(data);
-      repo.saveVendors(data);
-  };
-  const persistCustomers = (data: Customer[]) => {
-      setCustomers(data);
-      repo.saveCustomers(data);
-  };
-  const persistQuotes = (data: Quotation[]) => {
-      setQuotations(data);
-      repo.saveQuotes(data);
-  };
-  const persistEnquiries = (data: VendorEnquiry[]) => {
-      setEnquiries(data);
-      repo.saveEnquiries(data);
-  };
-  const persistSettings = (data: AppSettings) => {
-      setSettings(data);
-      repo.saveSettings(data);
-  };
-  const persistLog = (data: ActivityLog[]) => {
-      setActivityLog(data);
-      repo.saveLogs(data);
-  };
-
+  // --- Handlers ---
   const addNotification = (type: 'success' | 'error' | 'info' | 'warning', message: string) => {
-    if (!settings.enableNotifications && type === 'info') return;
     const id = Date.now().toString();
-    setNotifications(prev => [...prev, { id, type, message, timestamp: Date.now() }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 5000);
-  };
-
-  const removeNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000);
   };
 
   const logActivity = (module: string, action: string, description: string) => {
-    const newLog: ActivityLog = {
-      id: Date.now().toString(),
+    const log: ActivityLog = {
+      id: `AL-${Date.now()}`,
+      timestamp: new Date().toISOString(),
       module,
       action,
-      description,
-      timestamp: new Date().toISOString(),
-      user: currentUser ? currentUser.name : 'System'
+      description
     };
-    setActivityLog(prev => {
-        const updated = [newLog, ...prev].slice(0, 50);
-        repo.saveLogs(updated);
-        return updated;
-    });
-  };
-
-  const navigateTo = (view: AppView) => {
-    setActiveView(view);
-    setIsMobileMenuOpen(false);
-  };
-
-  const sharedProps: SharedProps = {
-    settings,
-    userRole: currentUser?.role || 'ADMIN',
-    currentUser: currentUser!,
-    onNotify: addNotification,
-    onLogActivity: logActivity,
-    onNavigate: navigateTo
+    setActivityLog(prev => [log, ...prev].slice(0, 50));
   };
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
-    addNotification('success', `Authentication successful. Welcome, ${user.name}.`);
+    addNotification('success', `Welcome back, ${user.name}`);
+    logActivity('Auth', 'Login', `${user.name} authenticated into ${user.role} role.`);
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    setActiveView(AppView.DASHBOARD);
-    addNotification('info', 'Logged out successfully.');
+    setCurrentView(AppView.DASHBOARD);
   };
 
-  if (!isDataLoaded) {
-      return (
-          <div className="h-screen w-full flex items-center justify-center bg-slate-50">
-              <div className="flex flex-col items-center animate-pulse">
-                  <Ship size={48} className="text-blue-500 mb-4" />
-                  <h2 className="text-lg font-bold text-slate-700">Initializing Unique CCS Platform...</h2>
-                  <p className="text-xs text-slate-400 mt-2">Connecting to Secure Gateway</p>
-              </div>
-          </div>
-      )
-  }
+  const updateVendors = async (v: Vendor) => {
+    await repo.saveItem('vendors', v, currentUser!);
+    setVendors(prev => {
+      const idx = prev.findIndex(item => item.id === v.id);
+      if (idx > -1) {
+        const next = [...prev];
+        next[idx] = v;
+        return next;
+      }
+      return [...prev, v];
+    });
+    addNotification('success', `Vendor ${v.name} saved.`);
+  };
+
+  const updateCustomers = async (c: Customer) => {
+    await repo.saveItem('customers', c, currentUser!);
+    setCustomers(prev => {
+      const idx = prev.findIndex(item => item.id === c.id);
+      if (idx > -1) {
+        const next = [...prev];
+        next[idx] = c;
+        return next;
+      }
+      return [...prev, c];
+    });
+    addNotification('success', `Customer ${c.companyName} saved.`);
+  };
+
+  const handleGenerateQuote = async (q: Quotation) => {
+    setQuotations(prev => [q, ...prev]);
+    logActivity('Quoting', 'Generated', `New quote ${q.id} generated for ${q.customerName}`);
+  };
+
+  const handleAddEnquiry = async (e: VendorEnquiry) => {
+    await repo.saveItem('enquiries', e, currentUser!);
+    setEnquiries(prev => [e, ...prev]);
+    logActivity('Procurement', 'Enquiry', `Market intake started for ${e.origin} to ${e.destination}`);
+  };
+
+  const handleAwardEnquiry = async (enquiryId: string, bid: VendorBid, sellPrice: number) => {
+    const enquiry = enquiries.find(e => e.id === enquiryId);
+    if (!enquiry) return;
+
+    const newQuote: Quotation = {
+      id: `Q-AWARD-${Date.now().toString().slice(-4)}`,
+      portalToken: 'manual-award',
+      modality: enquiry.modality,
+      customerId: 'C-SPOT',
+      customerName: 'Spot Market Client',
+      customerEmail: 'pending@client.com',
+      origin: enquiry.origin,
+      destination: enquiry.destination,
+      amount: sellPrice,
+      buyRate: bid.amount,
+      margin: sellPrice - bid.amount,
+      currency: bid.currency,
+      status: 'CONFIRMED',
+      date: new Date().toISOString().split('T')[0],
+      milestones: [{
+        status: 'BOOKING_CONFIRMED',
+        date: new Date().toISOString(),
+        notes: `Awarded to ${bid.vendorName} on spot market intake.`,
+        updatedBy: currentUser?.name || 'System'
+      }]
+    };
+
+    await repo.saveQuote(newQuote, currentUser!);
+    setQuotations(prev => [newQuote, ...prev]);
+    
+    const updatedEnquiry = { ...enquiry, status: 'AWARDED' as const };
+    await repo.saveItem('enquiries', updatedEnquiry, currentUser!);
+    setEnquiries(prev => prev.map(e => e.id === enquiryId ? updatedEnquiry : e));
+
+    addNotification('success', `Awarding ${bid.vendorName} and initializing shipment.`);
+    setCurrentView(AppView.REPORTS);
+  };
+
+  const handleAddMilestone = async (id: string, milestone: Milestone) => {
+    const quote = quotations.find(q => q.id === id);
+    if (!quote) return;
+    const updatedQuote = { 
+      ...quote, 
+      milestones: [milestone, ...(quote.milestones || [])] 
+    };
+    await repo.saveQuote(updatedQuote, currentUser!);
+    setQuotations(prev => prev.map(q => q.id === id ? updatedQuote : q));
+  };
+
+  // --- Views ---
+  const sharedProps = {
+    settings,
+    userRole: currentUser?.role || 'SALES',
+    currentUser: currentUser!,
+    onNotify: addNotification,
+    onLogActivity: logActivity,
+    onNavigate: setCurrentView
+  };
 
   if (!currentUser) {
     return <Login onLogin={handleLogin} users={users} />;
   }
-  
-  const pendingApprovalsCount = quotations.filter(q => q.status === 'PENDING_APPROVAL').length;
-  const activeEnquiriesCount = enquiries.filter(e => e.status !== 'CLOSED' && e.status !== 'AWARDED').length;
 
-  const renderContent = () => {
-    switch (activeView) {
+  const renderView = () => {
+    switch (currentView) {
       case AppView.DASHBOARD:
-        return <Dashboard 
-                  activityLog={activityLog} 
-                  quotations={quotations}
-                  enquiries={enquiries}
-                  onNavigateToReports={handleNavigateToReports}
-                  {...sharedProps} 
-               />;
-      case AppView.WORKFLOW:
-        return <WorkflowVisualizer {...sharedProps} />;
-      case AppView.SIMULATOR:
         return (
-          <QuoteSimulator 
-            onGenerateQuote={handleAddQuote} 
-            customers={customers} 
-            vendors={vendors} 
-            initialData={simulationPreload}
-            onClearInitialData={() => setSimulationPreload(null)}
-            {...sharedProps} 
-          />
+          <div className="space-y-8">
+            <Dashboard 
+              {...sharedProps} 
+              activityLog={activityLog} 
+              quotations={quotations} 
+              enquiries={enquiries}
+              onNavigateToReports={(f) => { setCurrentView(AppView.REPORTS); }}
+            />
+            <WorkflowVisualizer {...sharedProps} />
+          </div>
         );
+      case AppView.SIMULATOR:
+        return <QuoteSimulator {...sharedProps} customers={customers} onGenerateQuote={handleGenerateQuote} />;
       case AppView.VENDORS:
-        return <VendorNetwork vendors={vendors} onAddVendor={handleAddVendor} onUpdateVendor={handleUpdateVendor} {...sharedProps} />;
-      case AppView.CRM:
-        return <CRM customers={customers} onAddCustomer={handleAddCustomer} onUpdateCustomer={handleUpdateCustomer} {...sharedProps} />;
+        return <VendorNetwork {...sharedProps} vendors={vendors} onAddVendor={updateVendors} onUpdateVendor={updateVendors} />;
       case AppView.REPORTS:
         return (
           <Reports 
-            quotations={quotations} 
-            onUpdateStatus={handleUpdateStatus} 
-            onAddMilestone={handleAddMilestone}
-            defaultFilter={reportsFilter}
             {...sharedProps} 
+            quotations={quotations} 
+            onUpdateStatus={async (id, s) => {
+              const q = quotations.find(item => item.id === id);
+              if (q) {
+                const updated = { ...q, status: s };
+                await repo.saveQuote(updated, currentUser);
+                setQuotations(prev => prev.map(item => item.id === id ? updated : item));
+              }
+            }}
+            onAddMilestone={handleAddMilestone}
           />
         );
+      case AppView.CRM:
+        return <CRM {...sharedProps} customers={customers} onAddCustomer={updateCustomers} onUpdateCustomer={updateCustomers} />;
       case AppView.ENQUIRY:
         return (
           <VendorEnquiryComponent 
-            vendors={vendors} 
-            enquiries={enquiries}
-            onAddEnquiry={handleAddEnquiry}
-            onUpdateEnquiry={handleUpdateEnquiry}
-            onAwardEnquiry={handleAwardEnquiry}
-            onLoadToSimulator={handleLoadToSimulator}
             {...sharedProps} 
+            vendors={vendors} 
+            enquiries={enquiries} 
+            onAddEnquiry={handleAddEnquiry}
+            onUpdateEnquiry={async (e) => {
+              await repo.saveItem('enquiries', e, currentUser);
+              setEnquiries(prev => prev.map(item => item.id === e.id ? e : item));
+            }}
+            onAwardEnquiry={handleAwardEnquiry}
+            onLoadToSimulator={(req) => {
+              setCurrentView(AppView.SIMULATOR);
+              // Implementation would pre-fill simulator state
+            }}
           />
         );
       case AppView.SETTINGS:
-        return <Settings 
-                 onUpdateSettings={persistSettings} 
-                 users={users}
-                 onAddUser={handleAddUser}
-                 onDeleteUser={handleDeleteUser}
-                 onUpdatePassword={handleUpdatePassword}
-                 onResetData={handleResetData}
-                 {...sharedProps} 
-               />;
+        return (
+          <Settings 
+            {...sharedProps} 
+            onUpdateSettings={(s) => {
+              repo.saveSettings(s);
+              setSettings(s);
+            }}
+            users={users}
+            onAddUser={async (u) => {
+              await repo.saveItem('users', u, currentUser);
+              setUsers(prev => [...prev, u]);
+            }}
+            onDeleteUser={async (id) => {
+              // Implementation would call repo.deleteItem if available
+              setUsers(prev => prev.filter(u => u.id !== id));
+            }}
+          />
+        );
       default:
-        return <Dashboard 
-                  activityLog={activityLog} 
-                  quotations={quotations}
-                  enquiries={enquiries}
-                  onNavigateToReports={handleNavigateToReports}
-                  {...sharedProps} 
-               />;
+        return <div>View under construction</div>;
     }
   };
-
-  const handleAddVendor = (newVendor: Vendor) => {
-    const updated = [...vendors, newVendor];
-    persistVendors(updated);
-    logActivity('Vendor', 'Created', `Added new vendor: ${newVendor.name}`);
-    addNotification('success', `Vendor ${newVendor.name} added successfully.`);
-  };
-
-  const handleUpdateVendor = (updatedVendor: Vendor) => {
-    const updated = vendors.map(v => v.id === updatedVendor.id ? updatedVendor : v);
-    persistVendors(updated);
-    logActivity('Vendor', 'Updated', `Updated vendor details for: ${updatedVendor.name}`);
-    addNotification('info', `Vendor ${updatedVendor.name} updated.`);
-  };
-
-  const handleAddCustomer = (newCustomer: Customer) => {
-    const updated = [...customers, newCustomer];
-    persistCustomers(updated);
-    logActivity('CRM', 'Created', `Added new customer: ${newCustomer.companyName}`);
-    addNotification('success', `Customer ${newCustomer.companyName} added successfully.`);
-  };
-
-  const handleUpdateCustomer = (updatedCustomer: Customer) => {
-    const updated = customers.map(c => c.id === updatedCustomer.id ? updatedCustomer : c);
-    persistCustomers(updated);
-    logActivity('CRM', 'Updated', `Updated customer: ${updatedCustomer.companyName}`);
-    addNotification('info', `Customer ${updatedCustomer.companyName} updated.`);
-  };
-
-  const handleAddQuote = (newQuote: Quotation) => {
-    let quoteToSave = { ...newQuote };
-    if (quoteToSave.status === 'CONFIRMED' && (!quoteToSave.milestones || quoteToSave.milestones.length === 0)) {
-        quoteToSave.milestones = [{
-            status: 'BOOKING_CONFIRMED',
-            date: new Date().toISOString(),
-            updatedBy: currentUser?.name || 'System',
-            notes: 'Immediate booking confirmed.'
-        }];
-    }
-    const updatedQuotes = [quoteToSave, ...quotations];
-    persistQuotes(updatedQuotes);
-    logActivity('Quote', 'Generated', `Generated quote ${quoteToSave.id} for ${quoteToSave.customerEmail}`);
-    addNotification('success', `Quote ${quoteToSave.id} generated successfully.`);
-  };
-
-  const handleUpdateStatus = (id: string, status: QuoteStatus) => {
-    const updatedQuotes = quotations.map(q => q.id === id ? { ...q, status } : q);
-    persistQuotes(updatedQuotes);
-    logActivity('Quote', 'Status Change', `Quote ${id} status changed to ${status}`);
-    addNotification('info', `Quote ${id} updated to ${status}`);
-  };
-
-  const handleAddMilestone = (quoteId: string, milestone: Milestone) => {
-    const updatedQuotes = quotations.map(q => q.id === quoteId ? { ...q, milestones: [milestone, ...(q.milestones || [])] } : q);
-    persistQuotes(updatedQuotes);
-    logActivity('Ops', 'Milestone', `Shipment ${quoteId} updated: ${milestone.status}`);
-    addNotification('success', `Milestone ${milestone.status} recorded.`);
-  };
-
-  const handleAddEnquiry = (newEnquiry: VendorEnquiry) => {
-    const updated = [newEnquiry, ...enquiries];
-    persistEnquiries(updated);
-    logActivity('Enquiry', 'Created', `Floated new enquiry ${newEnquiry.reference}`);
-  };
-
-  const handleUpdateEnquiry = (updatedEnquiry: VendorEnquiry) => {
-    const updated = enquiries.map(e => e.id === updatedEnquiry.id ? updatedEnquiry : e);
-    persistEnquiries(updated);
-  };
-
-  const handleAwardEnquiry = (enquiryId: string, bid: VendorBid, sellPrice: number) => {
-    const enquiry = enquiries.find(e => e.id === enquiryId);
-    if (!enquiry) return;
-    const newQuote: Quotation = {
-      id: `Q-SPOT-${Date.now().toString().slice(-4)}`,
-      // Fix: modality is required in Quotation interface
-      modality: enquiry.modality,
-      customerEmail: 'spot.booking@uniqueccs.com',
-      ccEmail: '',
-      origin: enquiry.origin,
-      destination: enquiry.destination,
-      cargoType: `${enquiry.equipmentCount}x${enquiry.equipmentType}`,
-      amount: sellPrice,
-      currency: bid.currency,
-      status: 'CONFIRMED', 
-      date: new Date().toISOString().split('T')[0],
-      source: 'SPOT_BID',
-      sourceRef: enquiry.reference,
-      sourceVendorId: bid.vendorId,
-      sourceVendor: bid.vendorName,
-      milestones: [{ status: 'BOOKING_CONFIRMED', date: new Date().toISOString(), updatedBy: currentUser?.name || 'System' }]
-    };
-    handleAddQuote(newQuote);
-    addNotification('success', `Bid awarded and Booking ${newQuote.id} created.`);
-  };
-
-  const handleLoadToSimulator = (data: QuoteRequest) => {
-    setSimulationPreload(data);
-    setActiveView(AppView.SIMULATOR);
-  };
-
-  const handleNavigateToReports = (filter: QuoteStatus | 'ALL') => {
-    setReportsFilter(filter);
-    setActiveView(AppView.REPORTS);
-  };
-
-  const handleAddUser = (newUser: User) => {
-      const updated = [...users, newUser];
-      persistUsers(updated);
-      logActivity('Admin', 'User Created', `Registered new user: ${newUser.email}`);
-  };
-
-  const handleDeleteUser = (userId: string) => {
-      const updated = users.filter(u => u.id !== userId);
-      persistUsers(updated);
-  };
-
-  const handleUpdatePassword = (newPassword: string) => {
-    if (!currentUser) return;
-    const updated = users.map(u => u.id === currentUser.id ? { ...u, password: newPassword } : u);
-    persistUsers(updated);
-    setCurrentUser(prev => prev ? { ...prev, password: newPassword } : null);
-  };
-
-  const handleResetData = (type: 'TRANSACTIONS' | 'FULL') => {
-      if (type === 'TRANSACTIONS') {
-          persistQuotes([]);
-          persistEnquiries([]);
-          persistLog([]);
-          addNotification('success', 'Transactions cleared.');
-      } else {
-          localStorage.clear();
-          window.location.reload();
-      }
-  };
-
-  const NavItem = ({ view, icon: Icon, label, badgeCount }: { view: AppView; icon: any; label: string, badgeCount?: number }) => (
-    <button
-      onClick={() => {
-        setActiveView(view);
-        setReportsFilter('ALL'); 
-        setIsMobileMenuOpen(false);
-      }}
-      className={`flex items-center justify-between w-full px-4 py-3 rounded-lg transition-colors duration-200 ${
-        activeView === view
-          ? 'bg-blue-600 text-white shadow-md'
-          : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'
-      }`}
-    >
-      <div className="flex items-center space-x-3">
-        <Icon size={20} />
-        <span className="font-medium">{label}</span>
-      </div>
-      {badgeCount !== undefined && badgeCount > 0 && (
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeView === view ? 'bg-blue-50 text-white' : 'bg-red-100 text-red-600'}`}>
-          {badgeCount}
-        </span>
-      )}
-    </button>
-  );
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      <div className="fixed top-4 right-4 z-[100] flex flex-col space-y-2 pointer-events-none">
-        {notifications.map(n => (
-          <div key={n.id} className={`pointer-events-auto transform transition-all duration-300 translate-x-0 w-80 p-4 rounded-lg shadow-lg border-l-4 flex items-start space-x-3 bg-white ${n.type === 'success' ? 'border-emerald-500' : n.type === 'error' ? 'border-red-500' : n.type === 'warning' ? 'border-amber-500' : 'border-blue-500'}`}>
-             <div className="shrink-0">
-               {n.type === 'success' && <CheckCircle size={20} className="text-emerald-500" />}
-               {n.type === 'error' && <XCircle size={20} className="text-red-500" />}
-               {n.type === 'warning' && <AlertTriangle size={20} className="text-amber-500" />}
-               {n.type === 'info' && <Info size={20} className="text-blue-500" />}
-             </div>
-             <div className="flex-1 text-sm font-medium text-slate-800">{n.message}</div>
-             <button onClick={() => removeNotification(n.id)} className="text-slate-400 hover:text-slate-600"><X size={14} /></button>
-          </div>
-        ))}
-      </div>
-
-      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 h-full shadow-[2px_0_10px_-5px_rgba(0,0,0,0.1)] z-10">
-        <div className="flex items-center space-x-2 px-6 py-6 border-b border-slate-100">
-          <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-200">
+    <div className="min-h-screen bg-slate-50 flex font-sans">
+      {/* --- Sidebar --- */}
+      <aside className={`${isSidebarOpen ? 'w-80' : 'w-24'} bg-slate-900 transition-all duration-500 flex flex-col relative z-50 shadow-2xl overflow-hidden`}>
+        <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Ship size={240} className="text-white" /></div>
+        
+        <div className="p-8 flex items-center gap-4 border-b border-slate-800 relative z-10">
+          <div className="bg-blue-600 p-3 rounded-2xl shadow-xl shadow-blue-500/20">
             <Ship className="text-white" size={24} />
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">Unique CCS</h1>
-            <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">SeaFreight Automation</p>
-          </div>
+          {isSidebarOpen && (
+            <div className="animate-fade-in">
+              <h1 className="text-xl font-black text-white tracking-tighter uppercase italic">FreightFlow</h1>
+              <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Control Center</p>
+            </div>
+          )}
         </div>
-        
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
-          <NavItem view={AppView.DASHBOARD} icon={LayoutDashboard} label="Strategic Dashboard" />
-          <NavItem view={AppView.SIMULATOR} icon={Calculator} label="Quote Engine" />
-          <NavItem view={AppView.ENQUIRY} icon={Megaphone} label="Spot Bidding" badgeCount={activeEnquiriesCount} />
-          <div className="my-2 border-t border-slate-100"></div>
-          <NavItem view={AppView.REPORTS} icon={FileBarChart} label="Ledger & Ops" badgeCount={pendingApprovalsCount} />
-          <NavItem view={AppView.CRM} icon={Briefcase} label="CRM" />
-          <NavItem view={AppView.VENDORS} icon={Users} label="Vendors" />
-          <div className="my-2 border-t border-slate-100"></div>
-          <NavItem view={AppView.SETTINGS} icon={SettingsIcon} label="System Settings" />
+
+        <nav className="flex-1 p-6 space-y-2 relative z-10">
+          {[
+            { id: AppView.DASHBOARD, label: 'Control Pulse', icon: LayoutDashboard },
+            { id: AppView.ENQUIRY, label: 'Market Intake', icon: Zap },
+            { id: AppView.SIMULATOR, label: 'Quote Engine', icon: Target },
+            { id: AppView.REPORTS, label: 'Live Ledger', icon: FilePieChart },
+            { id: AppView.CRM, label: 'Corporate CRM', icon: Users },
+            { id: AppView.VENDORS, label: 'Vendor Grid', icon: Ship },
+          ].map(item => (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id)}
+              className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all group ${
+                currentView === item.id 
+                  ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 italic font-black' 
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <item.icon size={20} className={currentView === item.id ? 'animate-pulse' : 'group-hover:scale-110 transition-transform'} />
+              {isSidebarOpen && <span className="text-[12px] uppercase tracking-widest">{item.label}</span>}
+            </button>
+          ))}
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
-          <button onClick={handleLogout} className="flex items-center space-x-2 w-full px-4 py-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium">
-            <LogOut size={18} />
-            <span>Sign Out</span>
+        <div className="p-6 border-t border-slate-800 relative z-10">
+          <button
+            onClick={() => setCurrentView(AppView.SETTINGS)}
+            className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all mb-2 ${
+              currentView === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <SettingsIcon size={20} />
+            {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Settings</span>}
           </button>
-          <div className="mt-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
-            <div className="flex items-center space-x-2 mb-1">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-              <span className="text-xs font-semibold text-slate-700">{currentUser.role} Role</span>
-            </div>
-            <p className="text-[10px] text-slate-400 truncate">{currentUser.email}</p>
-          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-slate-400 hover:bg-red-500 hover:text-white transition-all group"
+          >
+            <LogOut size={20} className="group-hover:translate-x-1 transition-transform" />
+            {isSidebarOpen && <span className="text-[12px] font-black uppercase tracking-widest">Exit Portal</span>}
+          </button>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        <header className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200">
-          <div className="flex items-center space-x-2">
-            <Ship className="text-blue-600" size={24} />
-            <h1 className="text-lg font-bold text-slate-800">Unique CCS</h1>
+      {/* --- Main Content --- */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Header */}
+        <header className="bg-white border-b border-slate-200 px-10 py-6 flex justify-between items-center z-40">
+          <div className="flex items-center gap-6">
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-400 hover:text-slate-900 transition-colors">
+              <Workflow size={24} />
+            </button>
+            <h2 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter">
+              {currentView.replace('_', ' ')}
+            </h2>
           </div>
-          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-slate-600">
-            {isMobileMenuOpen ? <X /> : <Menu />}
-          </button>
+
+          <div className="flex items-center gap-8">
+            <div className="hidden md:flex relative group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18} />
+              <input 
+                type="text" 
+                placeholder="Global File Search..." 
+                className="pl-12 pr-6 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase tracking-widest outline-none focus:bg-white focus:border-blue-400 w-80 shadow-inner transition-all"
+              />
+            </div>
+            
+            <div className="flex items-center gap-4">
+               <button className="relative p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-blue-600 transition-all border border-slate-100">
+                  <Bell size={20} />
+                  <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>
+               </button>
+               <div className="h-10 w-px bg-slate-100"></div>
+               <div className="flex items-center gap-4 group cursor-pointer">
+                  <div className="text-right">
+                    <p className="text-xs font-black text-slate-900 uppercase tracking-tighter">{currentUser.name}</p>
+                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">{currentUser.role}</p>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-100 border-2 border-white shadow-lg flex items-center justify-center text-indigo-600 font-black italic transition-transform group-hover:scale-105">
+                    {currentUser.name.charAt(0)}
+                  </div>
+               </div>
+            </div>
+          </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50">
-          <div className="max-w-7xl mx-auto">
-            {renderContent()}
+        {/* Dynamic View */}
+        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar bg-slate-50/50">
+          {renderView()}
+        </div>
+      </main>
+
+      {/* --- Notifications Toasts --- */}
+      <div className="fixed bottom-10 right-10 z-[100] flex flex-col gap-4 pointer-events-none">
+        {notifications.map(n => (
+          <div key={n.id} className={`pointer-events-auto min-w-[320px] p-6 rounded-[2rem] shadow-2xl border flex items-start gap-4 animate-fade-in ${
+            n.type === 'success' ? 'bg-emerald-900 border-emerald-800 text-emerald-50' :
+            n.type === 'error' ? 'bg-red-900 border-red-800 text-red-50' :
+            n.type === 'warning' ? 'bg-amber-900 border-amber-800 text-amber-50' :
+            'bg-slate-900 border-slate-800 text-slate-50'
+          }`}>
+            <div className={`p-2 rounded-xl ${
+               n.type === 'success' ? 'bg-emerald-800 text-emerald-400' :
+               n.type === 'error' ? 'bg-red-800 text-red-400' :
+               n.type === 'warning' ? 'bg-amber-800 text-amber-400' :
+               'bg-slate-800 text-blue-400'
+            }`}>
+              {n.type === 'success' ? <CheckCircle2 size={20}/> : 
+               n.type === 'error' ? <AlertCircle size={20}/> : 
+               n.type === 'warning' ? <AlertCircle size={20}/> : 
+               <Info size={20}/>}
+            </div>
+            <div className="flex-1 pt-0.5">
+               <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-50 italic">{n.type}</p>
+               <p className="text-sm font-bold tracking-tight">{n.message}</p>
+            </div>
           </div>
-        </main>
+        ))}
       </div>
     </div>
   );

@@ -2,29 +2,26 @@
 export enum AppView {
   LOGIN = 'login',
   DASHBOARD = 'dashboard',
-  WORKFLOW = 'workflow',
   SIMULATOR = 'simulator',
   VENDORS = 'vendors',
-  REPORTS = 'reports',
+  REPORTS = 'reports', // Now handles Shipments
   CRM = 'crm',
   ENQUIRY = 'enquiry',
   SETTINGS = 'settings',
+  APPROVALS = 'approvals',
+  VENDOR_PORTAL = 'vendor_portal',
+  CUSTOMER_PORTAL = 'customer_portal'
 }
 
 export type UserRole = 'ADMIN' | 'MANAGER' | 'SALES' | 'OPS';
 export type Modality = 'SEA' | 'AIR';
-export type PackagingType = 'Pallet' | 'Carton' | 'Crate' | 'Loose' | 'Container-Load' | 'Skid' | 'Bundle' | 'Roll';
+export type Currency = 'USD' | 'EUR' | 'GBP' | 'CNY' | 'AED';
+export type QuoteStatus = 'SENT' | 'CONFIRMED' | 'LOST' | 'PENDING_APPROVAL' | 'RENEGOTIATE' | 'CANCELLED';
+export type EnquiryStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'BID_RECEIVED' | 'AWARDED' | 'CLOSED';
+export type ShipmentMilestoneStatus = 'BOOKING_CONFIRMED' | 'CARGO_PICKED_UP' | 'DEPARTED_POL' | 'AT_SEA' | 'ARRIVED_POD' | 'FLIGHT_DEPARTED' | 'FLIGHT_ARRIVED' | 'CUSTOMS_CLEARED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
+export type PackagingType = 'PALLET' | 'BOX' | 'CRATE' | 'LOOSE';
 
-export interface PackagingDetail {
-  id: string;
-  type: PackagingType;
-  length: number;
-  width: number;
-  height: number;
-  quantity: number;
-  unitWeight: number; // KG
-}
-
+// --- Base Entities ---
 export interface User {
   id: string;
   name: string;
@@ -53,10 +50,142 @@ export interface Address {
   zip: string;
 }
 
+// --- Governance & Security ---
+export interface PortalToken {
+  token: string;
+  entityId: string;
+  entityType: 'ENQUIRY' | 'QUOTE' | 'SHIPMENT';
+  expiry: string;
+  recipientEmail: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  quoteId: string;
+  requestedBy: string;
+  requestedAt: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reason: string;
+  marginAtRequest: number;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  changes: string; // JSON string of diff
+}
+
+export interface ActivityLog {
+  id: string;
+  timestamp: string;
+  module: string;
+  action: string;
+  description: string;
+}
+
+// --- Communication ---
+export interface CommunicationMessage {
+  id: string;
+  to: string;
+  subject: string;
+  body: string;
+  sentAt: string;
+  status: 'QUEUED' | 'SENT' | 'FAILED' | 'SIMULATED_SENT';
+  type: 'ENQUIRY' | 'QUOTE' | 'MILESTONE' | 'APPROVAL';
+  referenceId: string;
+}
+
+// --- Logistics Entities ---
+export interface Milestone {
+  status: ShipmentMilestoneStatus | string;
+  date: string;
+  notes?: string;
+  updatedBy: string;
+  location?: string;
+  isAutomated?: boolean;
+}
+
+export interface Shipment {
+  id: string;
+  quoteId: string;
+  customerId: string;
+  customerName: string;
+  trackingNumber: string; // AWB or Container No
+  modality: Modality;
+  origin: string;
+  destination: string;
+  status: 'BOOKED' | 'IN_TRANSIT' | 'ARRIVED' | 'CLEARED' | 'DELIVERED' | 'CANCELLED';
+  milestones: Milestone[];
+  createdAt: string;
+}
+
+export interface Quotation {
+  id: string;
+  portalToken: string;
+  modality: Modality;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  origin: string;
+  destination: string;
+  amount: number;
+  buyRate: number;
+  margin: number;
+  currency: Currency;
+  status: QuoteStatus;
+  date: string;
+  trackingNumber?: string;
+  milestones?: Milestone[];
+  cargoType?: string;
+}
+
+export interface VendorBid {
+  vendorId: string;
+  vendorName: string;
+  amount: number;
+  currency: Currency;
+  transitTime: number;
+  validityDate: string;
+  receivedAt: string;
+  freeTime?: number;
+}
+
+export interface VendorEnquiry {
+  id: string;
+  portalToken: string;
+  modality: Modality;
+  reference: string;
+  status: EnquiryStatus;
+  vendorsSentTo: string[]; // Vendor IDs
+  bids: VendorBid[];
+  sentDate: string;
+  origin: string;
+  destination: string;
+  commodity: string;
+  incoterms?: string;
+  readyDate?: string;
+  isHazmat?: boolean;
+  isStackable?: boolean;
+  equipmentType?: string;
+  equipmentCount?: number;
+  weight?: number;
+  volume?: number;
+  currency?: Currency;
+  targetRate?: number;
+  lastFollowUp?: string;
+}
+
 export interface Vendor {
   id: string;
   name: string;
-  tier: 'Premium' | 'Standard';
+  tier: 'Standard' | 'Premium';
   lanes: string[];
   apiReady: boolean;
   contractExpiry: string;
@@ -67,18 +196,27 @@ export interface Vendor {
 export interface Customer {
   id: string;
   companyName: string;
-  tier: 'VIP' | 'Regular';
-  notes?: string;
+  tier: 'Regular' | 'VIP';
   contacts: Contact[];
   addresses: Address[];
+  notes?: string;
 }
 
-export type Currency = 'USD' | 'EUR' | 'GBP' | 'CNY' | 'AED' | 'JPY' | 'AUD' | 'CAD';
-
-export interface QuoteLineItem {
-  description: string;
-  amount: number;
+export interface PackagingDetail {
+  type: PackagingType;
   quantity: number;
+  length?: number;
+  width?: number;
+  height?: number;
+  weight?: number;
+}
+
+export interface AppSettings {
+  companyName: string;
+  defaultCurrency: Currency;
+  defaultMarginPercent: number;
+  emailProvider?: string;
+  emailSignature: string;
 }
 
 export interface QuoteRequest {
@@ -88,128 +226,19 @@ export interface QuoteRequest {
   cargoType: string;
   weight?: number;
   volume?: number;
-  packaging?: PackagingDetail[];
-  chargeableWeight?: number; 
   etd?: string;
   transitTime?: number;
   buyRate: number;
   margin: number;
   currency: Currency;
-  customerId?: string;
-  contactId?: string;
   customerEmail: string;
-  customerName?: string;
-  ccEmail?: string;
-  lineItems: QuoteLineItem[];
+  lineItems: { description: string; amount: number; quantity: number }[];
   sourceRef?: string;
   sourceVendor?: string;
   sourceVendorId?: string;
 }
 
-export type QuoteStatus = 'SENT' | 'CONFIRMED' | 'LOST' | 'CANCELLED' | 'RENEGOTIATE' | 'RECALLED' | 'PENDING_APPROVAL';
-
-export type ShipmentMilestoneStatus = 'BOOKING_CONFIRMED' | 'CARGO_PICKED_UP' | 'DEPARTED_POL' | 'ARRIVED_POD' | 'CUSTOMS_CLEARED' | 'DELIVERED' | 'EXCEPTION' | 'FLIGHT_DEPARTED' | 'FLIGHT_ARRIVED';
-
-export interface Milestone {
-  status: ShipmentMilestoneStatus;
-  date: string;
-  location?: string;
-  notes?: string;
-  updatedBy: string;
-}
-
-export interface Quotation {
-  id: string;
-  modality: Modality;
-  customerId?: string;
-  customerName?: string;
-  customerEmail: string;
-  ccEmail?: string;
-  origin: string;
-  destination: string;
-  cargoType: string;
-  amount: number;
-  currency: Currency;
-  status: QuoteStatus;
-  date: string;
-  notes?: string;
-  etd?: string;
-  transitTime?: number;
-  packaging?: PackagingDetail[];
-  lineItems?: QuoteLineItem[];
-  source?: 'SIMULATOR' | 'SPOT_BID';
-  sourceRef?: string;
-  sourceVendorId?: string;
-  sourceVendor?: string;
-  milestones?: Milestone[];
-}
-
-export type EnquiryStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'BID_RECEIVED' | 'CLOSED' | 'AWARDED';
-
-export interface VendorBid {
-  vendorId: string;
-  vendorName: string;
-  amount: number;
-  currency: Currency;
-  transitTime: number;
-  validityDate: string;
-  freeTime: number;
-  remarks?: string;
-  receivedAt: string;
-  isWinner?: boolean;
-}
-
-export interface VendorEnquiry {
-  id: string;
-  modality: Modality;
-  reference: string;
-  origin: string;
-  destination: string;
-  incoterms: string;
-  readyDate: string;
-  commodity: string;
-  isHazmat?: boolean;
-  isStackable?: boolean;
-  equipmentType: string;
-  equipmentCount: number;
-  weight: number;
-  volume: number;
-  packaging?: PackagingDetail[];
-  currency: Currency;
-  targetRate?: number;
-  status: EnquiryStatus;
-  sentDate: string;
-  lastFollowUp?: string;
-  vendorsSentTo: string[];
-  bids: VendorBid[];
-}
-
-export interface AppSettings {
-  companyName: string;
-  defaultCurrency: Currency;
-  defaultMarginPercent: number;
-  emailSignature: string;
-  enableNotifications: boolean;
-  themeColor: string;
-  emailProvider: 'NATIVE' | 'OFFICE365' | 'GMAIL';
-}
-
-export interface SystemNotification {
-  id: string;
-  type: 'success' | 'error' | 'info' | 'warning';
-  message: string;
-  timestamp: number;
-}
-
-export interface ActivityLog {
-  id: string;
-  module: string;
-  action: string;
-  description: string;
-  timestamp: string;
-  user: string;
-}
-
+// Updated SharedProps for RBAC
 export interface SharedProps {
   settings: AppSettings;
   userRole: UserRole;
