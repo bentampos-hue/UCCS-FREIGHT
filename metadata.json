@@ -1,0 +1,5 @@
+{
+  "name": "UCCS",
+  "description": "A comprehensive dashboard and simulation platform for UCCS, automating the SeaFreight lifecycle from vendor enquiry to customer booking.",
+  "requestFramePermissions": []
+}
