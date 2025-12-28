@@ -1,15 +1,56 @@
-import { Vendor, Customer, Quotation, VendorEnquiry, ActivityLog, AppSettings, User, Shipment, CommunicationMessage, ApprovalRequest, AuditLog, CommercialParameters } from '../types';
-import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc as firestoreDeleteDoc } from './firebase';
+
+import { Job, User, AuditLog, AppSettings, CommunicationMessage, Shipment, VendorEnquiry, Quotation } from '../types';
+import { db, isFirebaseActive, collection, getDocs, setDoc, doc, deleteDoc } from './firebase';
 
 class Repository {
-    private storageType: 'LOCAL' | 'CLOUD' = 'LOCAL';
+    private storageType: 'LOCAL' | 'CLOUD' = isFirebaseActive ? 'CLOUD' : 'LOCAL';
 
-    constructor() {
-        this.storageType = isFirebaseActive ? 'CLOUD' : 'LOCAL';
+    async getJobs(): Promise<Job[]> {
+        return this.loadCollection<Job>('jobs');
+    }
+
+    async getJobById(id: string): Promise<Job | null> {
+        const jobs = await this.getJobs();
+        return jobs.find(j => j.id === id) || null;
+    }
+
+    async saveJob(job: Job, user: User) {
+        job.updatedAt = new Date().toISOString();
+        await this.saveItem('jobs', job, user);
+    }
+
+    async getMessages(): Promise<CommunicationMessage[]> {
+        return this.loadCollection<CommunicationMessage>('messages');
+    }
+
+    async saveMessages(messages: CommunicationMessage[]) {
+        if (this.storageType === 'CLOUD' && db) {
+            for (const msg of messages) {
+                await setDoc(doc(db, 'messages', msg.id), msg);
+            }
+        } else {
+            localStorage.setItem('uccs_messages', JSON.stringify(messages));
+        }
+    }
+
+    async getEnquiries(): Promise<VendorEnquiry[]> {
+        return this.loadCollection<VendorEnquiry>('enquiries');
+    }
+
+    async getQuotes(): Promise<Quotation[]> {
+        return this.loadCollection<Quotation>('quotes');
+    }
+
+    async saveQuote(quote: Quotation, user: User) {
+        await this.saveItem('quotes', quote, user);
+    }
+
+    async getShipments(): Promise<Shipment[]> {
+        return this.loadCollection<Shipment>('shipments');
     }
 
     async loadCollection<T>(key: string): Promise<T[]> {
-        if (this.storageType === 'CLOUD') {
+        if (this.storageType === 'CLOUD' && db) {
             const querySnapshot = await getDocs(collection(db, key));
             return querySnapshot.docs.map(doc => doc.data() as T);
         }
@@ -17,96 +58,51 @@ class Repository {
     }
 
     async saveItem<T extends { id: string }>(key: string, item: T, user: User) {
+        if (this.storageType === 'CLOUD' && db) {
+            await setDoc(doc(db, key, item.id), item);
+        } else {
+            const data = await this.loadCollection<T>(key);
+            const index = data.findIndex(i => i.id === item.id);
+            if (index > -1) {
+                // Ensure arrays are preserved by merging top-level keys properly
+                data[index] = { ...data[index], ...item };
+            } else {
+                data.push(item);
+            }
+            localStorage.setItem(`uccs_${key}`, JSON.stringify(data));
+        }
+        this.addAuditLog(user, 'SAVE', key, item.id);
+    }
+
+    async deleteItem(key: string, id: string, user: User) {
+        if (this.storageType === 'CLOUD' && db) {
+            await deleteDoc(doc(db, key, id));
+        } else {
+            const data = await this.loadCollection<{id: string}>(key);
+            const filtered = data.filter(i => i.id !== id);
+            localStorage.setItem(`uccs_${key}`, JSON.stringify(filtered));
+        }
+        this.addAuditLog(user, 'DELETE', key, id);
+    }
+
+    async getAuditLogs(): Promise<AuditLog[]> {
+        return JSON.parse(localStorage.getItem('uccs_audit_logs') || '[]');
+    }
+
+    async addAuditLog(user: User, action: string, type: string, id: string) {
         const log: AuditLog = {
             id: `LOG-${Date.now()}`,
             timestamp: new Date().toISOString(),
             userId: user.id,
             userName: user.name,
-            action: 'SAVE',
-            entityType: key,
-            entityId: item.id,
-            changes: JSON.stringify(item)
-        };
-        await this.addAuditLog(log);
-
-        if (this.storageType === 'CLOUD') {
-            await setDoc(doc(db, key, item.id), item);
-        } else {
-            const data = await this.loadCollection<T>(key);
-            const index = data.findIndex(i => i.id === item.id);
-            if (index > -1) data[index] = item; else data.push(item);
-            localStorage.setItem(`uccs_${key}`, JSON.stringify(data));
-        }
-    }
-
-    async deleteItem(key: string, id: string, user: User) {
-        const log: AuditLog = {
-            id: `LOG-DEL-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            userId: user.id,
-            userName: user.name,
-            action: 'DELETE',
-            entityType: key,
+            action,
+            entityType: type,
             entityId: id,
-            changes: 'Record Deleted'
+            changes: 'State Mutation Synchronized'
         };
-        await this.addAuditLog(log);
-
-        if (this.storageType === 'CLOUD') {
-            await firestoreDeleteDoc(doc(db, key, id));
-        } else {
-            const data = await this.loadCollection<any>(key);
-            const filtered = data.filter(i => i.id !== id);
-            localStorage.setItem(`uccs_${key}`, JSON.stringify(filtered));
-        }
-    }
-
-    async saveItemsBulk<T extends { id: string }>(key: string, items: T[], user: User) {
-        if (this.storageType === 'CLOUD') {
-            for (const item of items) {
-                await setDoc(doc(db, key, item.id), item);
-            }
-        } else {
-            const data = await this.loadCollection<T>(key);
-            const existingIds = new Set(data.map(i => i.id));
-            const newData = [...data];
-            
-            items.forEach(item => {
-                if (existingIds.has(item.id)) {
-                    const idx = newData.findIndex(i => i.id === item.id);
-                    newData[idx] = item;
-                } else {
-                    newData.push(item);
-                }
-            });
-            localStorage.setItem(`uccs_${key}`, JSON.stringify(newData));
-        }
-    }
-
-    async getShipments() { return this.loadCollection<Shipment>('shipments'); }
-    async getMessages() { return this.loadCollection<CommunicationMessage>('messages'); }
-    async getApprovals() { return this.loadCollection<ApprovalRequest>('approvals'); }
-    async getEnquiries() { return this.loadCollection<VendorEnquiry>('enquiries'); }
-    async getQuotes() { return this.loadCollection<Quotation>('quotations'); }
-    async getUsers() { return this.loadCollection<User>('users'); }
-    async getVendors() { return this.loadCollection<Vendor>('vendors'); }
-    async getCustomers() { return this.loadCollection<Customer>('customers'); }
-    async getAuditLogs() { return this.loadCollection<AuditLog>('audit_logs'); }
-
-    async saveQuote(quote: Quotation, user: User) { return this.saveItem('quotations', quote, user); }
-    async saveShipment(ship: Shipment, user: User) { return this.saveItem('shipments', ship, user); }
-    async saveMessages(msgs: CommunicationMessage[]) { 
-        localStorage.setItem('uccs_messages', JSON.stringify(msgs));
-    }
-
-    async addAuditLog(log: AuditLog) {
-        if (this.storageType === 'CLOUD') {
-            await setDoc(doc(db, 'audit_logs', log.id), log);
-        } else {
-            const logs = JSON.parse(localStorage.getItem('uccs_audit_logs') || '[]');
-            logs.unshift(log);
-            localStorage.setItem('uccs_audit_logs', JSON.stringify(logs.slice(0, 500)));
-        }
+        const logs = JSON.parse(localStorage.getItem('uccs_audit_logs') || '[]');
+        logs.unshift(log);
+        localStorage.setItem('uccs_audit_logs', JSON.stringify(logs.slice(0, 500)));
     }
 
     getSettings(defaultSettings: AppSettings): AppSettings {

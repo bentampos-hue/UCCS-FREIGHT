@@ -14,13 +14,13 @@ interface ErrorBoundaryState {
 }
 
 // Error Boundary for Production Stability
-// Fixed: Using React.Component explicitly to resolve inheritance issues with the 'props' property.
+// Fixed: Explicitly declaring 'props' and 'state' properties 
+// to ensure the TypeScript compiler correctly identifies them as members of the class.
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = { hasError: false, error: null };
-
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-  }
+  // Explicitly declare props and initialize state as class properties.
+  // This addresses "Property 'props' / 'state' does not exist on type 'ErrorBoundary'" errors.
+  props: ErrorBoundaryProps;
+  state: ErrorBoundaryState = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -31,7 +31,11 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   render() {
-    if (this.state.hasError) {
+    // Accessing state and props correctly using 'this' context on the class instance.
+    const { hasError, error } = this.state;
+    const { children } = this.props;
+
+    if (hasError) {
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
           <div className="bg-white p-8 rounded-xl shadow-xl border border-red-100 text-center max-w-md">
@@ -50,15 +54,14 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
               <RefreshCw size={18} className="mr-2" /> Reload Application
             </button>
             <p className="mt-4 text-xs text-slate-300 font-mono">
-              {this.state.error?.message}
+              {error?.message}
             </p>
           </div>
         </div>
       );
     }
 
-    // Fix: Accessing children from props on the class component instance
-    return this.props.children; 
+    return children || null; 
   }
 }
 

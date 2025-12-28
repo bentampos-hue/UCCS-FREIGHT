@@ -1,374 +1,244 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { 
-  ShieldAlert, Send, Target, Zap, ArrowRight, Ship, Plane, Globe, Calculator, User, Plus, Trash2, Settings2, Scale, PackageSearch, ChevronRight, MapPin, PackagePlus, X, FileText, ExternalLink, Mail, CheckCircle, ShieldCheck, RefreshCw, ToggleLeft, ToggleRight
-} from 'lucide-react';
-import { Quotation, SharedProps, Customer, Modality, Currency, PackagingLine, QuoteRequest } from '../types';
-import { repo } from '../services/repository';
-import { tokenService } from '../services/tokenService';
-import { draftService } from '../services/draftService';
 
-interface LineItem {
-  id: string;
-  description: string;
-  buyRate: number;
-  sellRate: number;
-  quantity: number;
-}
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Send, Target, ArrowRight, ShieldCheck, 
+  FileText, Clock, Trash2, Plus, Users, 
+  ChevronRight, Calculator, CheckCircle2, History, AlertCircle
+} from 'lucide-react';
+import { Job, SharedProps, QuoteVersion, User, Customer, AppView } from '../types';
+import { repo } from '../services/repository';
+import { calculateCargoMetrics } from '../utils/logistics';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
+import { Card } from './ui/Card';
 
 interface QuoteSimulatorProps extends SharedProps {
   customers: Customer[];
-  onGenerateQuote: (quote: Quotation) => void;
-  prefillData?: QuoteRequest | null;
-  onClearPrefill: () => void;
+  initialJobId?: string | null;
+  onClearJobId?: () => void;
 }
 
-const QuoteSimulator: React.FC<QuoteSimulatorProps> = ({ settings, currentUser, onNotify, customers, onGenerateQuote, prefillData, onClearPrefill }) => {
-  const [loading, setLoading] = useState(false);
-  const [modality, setModality] = useState<Modality>('SEA');
-  const [isManualMode, setIsManualMode] = useState(false);
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [generatedToken, setGeneratedToken] = useState('');
+const QuoteSimulator: React.FC<QuoteSimulatorProps> = ({ 
+  currentUser, onNotify, customers, settings, onNavigate, initialJobId, onClearJobId 
+}) => {
+  const [job, setJob] = useState<Job | null>(null);
+  const [activeVersion, setActiveVersion] = useState<QuoteVersion | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Master Builder State
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerId, setCustomerId] = useState('');
-  
-  // Advanced Routing
-  const [originPort, setOriginPort] = useState('');
-  const [destPort, setDestPort] = useState('');
-  const [originAddr, setOriginAddr] = useState('');
-  const [destAddr, setDestAddr] = useState('');
-
-  const [incoterms, setIncoterms] = useState('FOB');
-  const [serviceLevel, setServiceLevel] = useState('Standard');
-  
-  // Dynamic Cargo
-  const [cargoLines, setCargoLines] = useState<PackagingLine[]>([
-    { id: '1', type: 'PALLET', quantity: 1, length: 120, width: 80, height: 100, weightPerUnit: 450, description: 'General Logistics Cargo' }
-  ]);
-
-  // Financials
-  const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: '1', description: 'Freight Net Cost', buyRate: 0, sellRate: 0, quantity: 1 }
-  ]);
-
-  // --- DRAFT & PERSISTENCE LOGIC ---
-  
+  // Initialize from props instead of URL search params
   useEffect(() => {
-    if (prefillData) {
-      applyData(prefillData);
+    if (initialJobId) {
+      repo.getJobById(initialJobId).then(found => {
+        if (found) {
+          setJob(found);
+          if (found.quoteVersions.length > 0) {
+            setActiveVersion(found.quoteVersions[found.quoteVersions.length - 1]);
+          } else {
+            handleNewVersion(found);
+          }
+        }
+        setIsLoading(false);
+      });
     } else {
-      const draft = draftService.getDraft('quote_builder');
-      if (draft && window.confirm("Restore unsaved quote progress?")) {
-        applyData(draft);
-        onNotify('info', 'Unsaved progress restored.');
-      }
+      setIsLoading(false);
     }
-  }, []);
+  }, [initialJobId]);
 
-  const applyData = (data: any) => {
-    if (data.modality) setModality(data.modality);
-    if (data.origin) setOriginPort(data.origin);
-    if (data.destination) setDestPort(data.destination);
-    if (data.originAddress) setOriginAddr(data.originAddress);
-    if (data.destinationAddress) setDestAddr(data.destinationAddress);
-    if (data.cargoLines) setCargoLines(data.cargoLines);
-    if (data.customerEmail) setCustomerEmail(data.customerEmail);
-    if (data.lineItems) {
-      setLineItems(data.lineItems.map((l: any) => ({ 
-        ...l, 
-        id: l.id || Math.random().toString(),
-        sellRate: l.sellRate || Math.round(l.amount * 1.15)
-      })));
-    }
-  };
-
-  useEffect(() => {
-    const currentState = {
-      modality, origin: originPort, destination: destPort, originAddress: originAddr,
-      destinationAddress: destAddr, cargoLines, lineItems, customerEmail
-    };
-    draftService.saveDraft('quote_builder', currentState);
-  }, [modality, originPort, destPort, originAddr, destAddr, cargoLines, lineItems, customerEmail]);
-
-  // --- SMART PASTE FEATURE ---
-  const handleSmartPaste = useCallback((e: React.ClipboardEvent, target: 'ORIGIN' | 'DEST') => {
-    const text = e.clipboardData.getData('Text');
-    const portMatch = text.match(/\b[A-Z]{3}\b/); 
-    if (portMatch) {
-      onNotify('info', `Intelligence: Pattern detected. Auto-filling port code.`);
-      if (target === 'ORIGIN') setOriginPort(portMatch[0]);
-      else setDestPort(portMatch[0]);
-    }
-  }, [onNotify]);
-
-  // Modality Math
   const metrics = useMemo(() => {
-    const grossWeight = cargoLines.reduce((s, l) => s + (l.weightPerUnit * l.quantity), 0);
-    const grossVolume = cargoLines.reduce((s, l) => s + ((l.length * l.width * l.height) / 1000000 * l.quantity), 0);
-    
-    let chargeable = 0;
-    if (modality === 'AIR') {
-      const volFactor = settings.commercialParameters.air.volumetricFactor;
-      const volWeight = (grossVolume * 1000000) / (volFactor || 6000);
-      chargeable = Math.max(grossWeight, volWeight);
-    } else {
-      const wmRule = settings.commercialParameters.sea.wmRule;
-      const wmWeight = grossWeight / (wmRule || 1000);
-      chargeable = Math.max(grossVolume, wmWeight, settings.commercialParameters.sea.lclMinCbm || 1);
-    }
-    return { grossWeight, grossVolume, chargeable };
-  }, [cargoLines, modality, settings]);
+    if (!job) return { totalActualWeight: 0, totalVolumeCbm: 0, chargeableUnits: 0 };
+    return calculateCargoMetrics(job.intakeData.cargoLines, job.intakeData.modality);
+  }, [job?.intakeData.cargoLines, job?.intakeData.modality]);
 
-  const totals = useMemo(() => {
-    const buy = lineItems.reduce((s, i) => s + (i.buyRate * i.quantity), 0);
-    const sell = lineItems.reduce((s, i) => s + (i.sellRate * i.quantity), 0);
-    const margin = sell > 0 ? ((sell - buy) / sell) * 100 : 0;
-    return { buy, sell, margin };
-  }, [lineItems]);
-
-  const validateForm = () => {
-    if (!customerEmail || !customerEmail.includes('@')) {
-      onNotify('error', 'Valid Dispatch Email is required.');
-      return false;
-    }
-    if (!originPort || !destPort) {
-      onNotify('error', 'Routing DNA (POL/POD) is incomplete.');
-      return false;
-    }
-    if (totals.sell <= 0) {
-      onNotify('error', 'Commercial value must be greater than zero.');
-      return false;
-    }
-    return true;
-  };
-
-  const handleOpenReview = () => {
-    if (!validateForm()) return;
-    const quoteId = `Q-${Date.now().toString().slice(-6)}`;
-    if (!isManualMode) {
-      const token = tokenService.generate(quoteId, 'QUOTE', customerEmail);
-      setGeneratedToken(token);
-    }
-    setShowReviewModal(true);
-  };
-
-  const handleFinalDispatch = async () => {
-    setLoading(true);
-    const quoteId = `Q-${Date.now().toString().slice(-6)}`;
-    const needsApproval = totals.margin < settings.defaultMarginPercent;
-    
-    const newQuote: Quotation = {
-      id: quoteId,
-      portalToken: isManualMode ? undefined : generatedToken,
-      isManual: isManualMode,
-      modality,
-      customerId: customerId || 'C-SPOT',
-      customerName: customerName || 'Spot Market Entity',
-      customerEmail,
-      origin: originPort,
-      destination: destPort,
-      originAddress: originAddr,
-      destinationAddress: destAddr,
-      amount: Math.round(totals.sell),
-      buyRate: Math.round(totals.buy),
-      margin: Math.round(totals.sell - totals.buy),
-      currency: settings.defaultCurrency,
-      status: needsApproval ? 'PENDING_APPROVAL' : 'SENT',
-      date: new Date().toISOString().split('T')[0],
-      cargoLines,
-      sourceEnquiryId: prefillData?.sourceEnquiryId,
-      details: { ...metrics, equipment: `${incoterms} Terms | Service: ${serviceLevel}` }
+  const handleNewVersion = (targetJob: Job) => {
+    const newVersion: QuoteVersion = {
+      id: `QV-${Date.now()}`,
+      version: targetJob.quoteVersions.length + 1,
+      buySource: 'MANUAL',
+      buyPrice: 0,
+      sellPrice: 0,
+      margin: 0,
+      currency: targetJob.intakeData.currency,
+      validUntil: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+      inclusions: ['Terminal Handling', 'Customs Doc'],
+      exclusions: ['Duties & Taxes'],
+      status: 'DRAFT',
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser.name
     };
-
-    await repo.saveQuote(newQuote, currentUser);
-    
-    // Mailto Integration for quote
-    const subject = `Logistics Offer: ${originPort} -> ${destPort} | REF: ${quoteId}`;
-    const portalUrl = `https://uccs-portal.web.app/accept/${generatedToken}`;
-    const body = `Dear ${customerName || 'Partner'},\n\nPlease find the following logistics offer for your ${modality} requirement:\n\nROUTE: ${originPort} -> ${destPort}\nVALUE: ${settings.defaultCurrency} ${Math.round(totals.sell).toLocaleString()}\nINCOTERMS: ${incoterms}\n\n${!isManualMode ? `ACCEPT ONLINE:\n${portalUrl}` : 'Please confirm via return email.'}\n\nBest Regards,\nUnique CCS Team`;
-    
-    window.location.href = `mailto:${customerEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-    onGenerateQuote(newQuote);
-    draftService.clearDraft('quote_builder');
-    setShowReviewModal(false);
-    setLoading(false);
-    onClearPrefill();
-    onNotify('success', needsApproval ? `Quote ${quoteId} queued for Manager Approval.` : `Offer ${quoteId} authorized and dispatched.`);
+    setActiveVersion(newVersion);
   };
 
-  const updateCargoLine = (id: string, field: keyof PackagingLine, value: any) => setCargoLines(cargoLines.map(l => l.id === id ? { ...l, [field]: value } : l));
-  const removeCargoLine = (id: string) => cargoLines.length > 1 && setCargoLines(cargoLines.filter(l => l.id !== id));
-  const updateLineItem = (id: string, field: keyof LineItem, value: any) => setLineItems(lineItems.map(i => i.id === id ? { ...i, [field]: value } : i));
-  const removeLineItem = (id: string) => setLineItems(lineItems.filter(i => i.id !== id));
+  const handleSaveVersion = async () => {
+    if (!job || !activeVersion) return;
+    
+    // Calculate Margin
+    const margin = activeVersion.sellPrice - activeVersion.buyPrice;
+    const marginPercent = activeVersion.sellPrice > 0 ? (margin / activeVersion.sellPrice) * 100 : 0;
+    
+    const updatedVersion = { ...activeVersion, margin: marginPercent };
+    const updatedVersions = [...job.quoteVersions];
+    const existingIdx = updatedVersions.findIndex(v => v.id === updatedVersion.id);
+    
+    if (existingIdx > -1) updatedVersions[existingIdx] = updatedVersion;
+    else updatedVersions.push(updatedVersion);
+
+    const updatedJob = { ...job, quoteVersions: updatedVersions, status: 'QUOTING' as any };
+    await repo.saveJob(updatedJob, currentUser);
+    setJob(updatedJob);
+    onNotify('success', `Offer Version v${updatedVersion.version} synchronized.`);
+  };
+
+  if (!job) return (
+    <div className="flex flex-col items-center justify-center p-20 text-center space-y-4">
+      <div className="p-4 bg-blue-50 rounded-full text-blue-500"><Target size={48} /></div>
+      <h2 className="text-xl font-bold text-slate-700">No Job Target</h2>
+      <p className="text-slate-400 text-sm max-w-xs">Please select an opportunity from the Job Registry to initiate the quoting protocol.</p>
+      <Button onClick={() => onNavigate(AppView.PROJECT_CENTER)}>Back to Registry</Button>
+    </div>
+  );
 
   return (
-    <div className="space-y-8 animate-fade-in pb-20 italic">
-      <div className="flex items-center gap-4 px-10 mb-[-1.5rem]">
-        <div className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center text-[10px] font-black">1</span><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Intake</span></div>
-        <div className="w-10 h-px bg-slate-200"></div>
-        <div className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">2</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest underline decoration-blue-500 underline-offset-4">Quoting</span></div>
-        <div className="w-10 h-px bg-slate-200"></div>
-        <div className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center text-[10px] font-black">3</span><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Execution</span></div>
-      </div>
-
-      <div className="bg-slate-900 text-white p-12 rounded-[3.5rem] shadow-2xl relative overflow-hidden border-b-[16px] border-blue-600">
-        <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Calculator size={280} /></div>
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
-          <div>
-            <div className="flex items-center gap-4 mb-6">
-              <span className="bg-blue-600 px-4 py-1.5 rounded-full text-[11px] font-black uppercase tracking-widest shadow-lg italic">Production Mode v6</span>
-              <button onClick={() => setIsManualMode(!isManualMode)} className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">
-                {isManualMode ? <ToggleRight className="text-emerald-400" /> : <ToggleLeft className="text-slate-500" />}
-                {isManualMode ? 'MANUAL SENDING' : 'PORTAL SYSTEM'}
-              </button>
-            </div>
-            <h3 className="text-5xl font-black tracking-tighter uppercase leading-none mb-4">Precision Engine</h3>
-            <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px]">Industrial Quoting Terminal</p>
+    <div className="max-w-6xl mx-auto space-y-8 animate-fade-in pb-20">
+      <header className="flex justify-between items-end border-b border-slate-200 pb-6">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <Badge color="indigo">Quoting Protocol</Badge>
+            <span className="text-slate-400 text-xs font-mono">{job.id}</span>
           </div>
-          <div className="flex bg-slate-800 p-2 rounded-3xl z-10 shadow-2xl border border-slate-700 shrink-0">
-            <button onClick={() => setModality('SEA')} className={`flex items-center space-x-4 px-10 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all ${modality === 'SEA' ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/30' : 'text-slate-500 hover:text-white'}`}>
-              <Ship size={20} /> <span>SEA FREIGHT</span>
-            </button>
-            <button onClick={() => setModality('AIR')} className={`flex items-center space-x-4 px-10 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all ${modality === 'AIR' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/30' : 'text-slate-500 hover:text-white'}`}>
-              <Plane size={20} /> <span>AIR FREIGHT</span>
-            </button>
-          </div>
+          <h2 className="text-2xl font-bold text-slate-800">Professional Offer Manager</h2>
         </div>
-      </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => onNavigate(AppView.PROJECT_CENTER)}>Registry</Button>
+          <Button variant="secondary" onClick={() => handleNewVersion(job)}>+ New Version</Button>
+          <Button onClick={handleSaveVersion}>Save Offer v{activeVersion?.version}</Button>
+        </div>
+      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 font-sans">
-        <div className="lg:col-span-8 space-y-10">
-          <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-            <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] mb-12 border-b border-slate-50 pb-8 flex items-center italic">
-              <MapPin size={20} className="mr-4 text-blue-600" /> [01] Routing DNA
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-6">
-                <select 
-                    value={customerId}
-                    onChange={e => {
-                      const c = customers.find((x: any) => x.id === e.target.value);
-                      if (c) {
-                        setCustomerId(c.id); setCustomerName(c.companyName);
-                        setCustomerEmail(c.contacts.find((x: any) => x.isPrimary)?.email || '');
-                      }
-                    }}
-                    className="w-full p-5 border-2 border-slate-100 bg-slate-50 rounded-3xl outline-none focus:border-blue-500 font-black uppercase text-sm italic shadow-inner"
-                  >
-                    <option value="">Select Account</option>
-                    {customers.map((c: any) => <option key={c.id} value={c.id}>{c.companyName}</option>)}
-                  </select>
-                <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)} className="w-full p-5 border-2 border-slate-100 bg-slate-50 rounded-3xl outline-none focus:border-blue-500 font-black text-sm shadow-inner italic" placeholder="decision-maker@corp.com" />
-              </div>
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <input type="text" onPaste={(e) => handleSmartPaste(e, 'ORIGIN')} value={originPort} onChange={e => setOriginPort(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-500 font-black uppercase text-xs shadow-inner italic" placeholder="POL CODE" />
-                  <input type="text" onPaste={(e) => handleSmartPaste(e, 'DEST')} value={destPort} onChange={e => setDestPort(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-500 font-black uppercase text-xs shadow-inner italic" placeholder="POD CODE" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-8">
+          <Card title={`Pricing Matrix (v${activeVersion?.version})`}>
+            <div className="grid grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Buy Rate (Net)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 font-bold text-xs">{job.intakeData.currency}</span>
+                    <input 
+                      type="number"
+                      className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-lg text-lg font-black text-slate-700 focus:border-blue-500 outline-none"
+                      value={activeVersion?.buyPrice}
+                      onChange={e => setActiveVersion({...activeVersion!, buyPrice: Number(e.target.value)})}
+                    />
+                  </div>
                 </div>
-                <textarea value={originAddr} onChange={e => setOriginAddr(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl outline-none focus:border-blue-500 text-xs font-bold h-24 resize-none shadow-inner italic" placeholder="Pickup coordinates..." />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Valid Until</label>
+                  <input 
+                    type="date"
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm font-semibold"
+                    value={activeVersion?.validUntil}
+                    onChange={e => setActiveVersion({...activeVersion!, validUntil: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100 flex flex-col justify-center text-center">
+                  <label className="text-[10px] font-bold text-blue-400 uppercase mb-2">Target Sell Price</label>
+                  <div className="relative flex items-baseline justify-center gap-2">
+                    <span className="text-lg font-bold text-blue-600">{job.intakeData.currency}</span>
+                    <input 
+                      type="number"
+                      className="w-40 bg-transparent text-5xl font-black text-blue-600 border-b-4 border-blue-200 focus:border-blue-500 outline-none text-center"
+                      value={activeVersion?.sellPrice}
+                      onChange={e => setActiveVersion({...activeVersion!, sellPrice: Number(e.target.value)})}
+                    />
+                  </div>
+                  <p className="text-[10px] text-blue-400 mt-4 font-bold italic">Adjusting sell price updates margin in real-time</p>
               </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-            <div className="flex justify-between items-center mb-10 border-b border-slate-50 pb-8">
-              <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center italic">
-                <PackageSearch size={20} className="mr-4 text-indigo-600" /> [02] Operational Cargo Profile
-              </h4>
-              <button onClick={() => setCargoLines([...cargoLines, { id: Date.now().toString(), type: 'PALLET', quantity: 1, length: 120, width: 80, height: 100, weightPerUnit: 0, description: '' }])} className="flex items-center gap-2 bg-slate-100 text-slate-600 text-[10px] font-black px-5 py-2 rounded-xl hover:bg-indigo-600 hover:text-white transition-all uppercase tracking-widest italic shadow-inner">
-                <Plus size={14}/> Add Node
-              </button>
-            </div>
-            <div className="space-y-4">
-              {cargoLines.map((line) => (
-                <div key={line.id} className="grid grid-cols-12 gap-4 items-end bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 shadow-inner group transition-all hover:bg-white hover:border-indigo-100">
-                  <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Qty</label><input type="number" value={line.quantity} onChange={e => updateCargoLine(line.id, 'quantity', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black outline-none focus:border-indigo-500" /></div>
-                  <div className="col-span-3"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Type</label><select value={line.type} onChange={e => updateCargoLine(line.id, 'type', e.target.value as any)} className="w-full p-3 border-2 border-slate-200 rounded-xl text-[10px] font-black uppercase italic outline-none focus:border-indigo-500"><option value="PALLET">Pallet</option><option value="BOX">Box</option><option value="CONTAINER">Container</option></select></div>
-                  <div className="col-span-4"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">LxWxH (cm)</label><div className="grid grid-cols-3 gap-1"><input type="number" value={line.length} onChange={e => updateCargoLine(line.id, 'length', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /><input type="number" value={line.width} onChange={e => updateCargoLine(line.id, 'width', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /><input type="number" value={line.height} onChange={e => updateCargoLine(line.id, 'height', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /></div></div>
-                  <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Unit Kg</label><input type="number" value={line.weightPerUnit} onChange={e => updateCargoLine(line.id, 'weightPerUnit', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black outline-none" /></div>
-                  <div className="col-span-1 flex justify-end pb-1"><button onClick={() => removeCargoLine(line.id)} className="p-3 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button></div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-            <div className="flex justify-between items-center mb-10 border-b border-slate-50 pb-8">
-              <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center italic">
-                <Settings2 size={20} className="mr-4 text-emerald-600" /> [03] Financial Ledger
-              </h4>
-              <button onClick={() => setLineItems([...lineItems, { id: Date.now().toString(), description: '', buyRate: 0, sellRate: 0, quantity: 1 }])} className="px-6 py-2 bg-slate-900 text-white rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-600 transition-all shadow-xl shadow-slate-200 italic">
-                <Plus size={14} /> Add Node
-              </button>
-            </div>
-            <div className="space-y-4">
-              {lineItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-12 gap-4 items-end bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-inner group transition-all hover:bg-white hover:border-emerald-100">
-                  <div className="col-span-4"><input value={item.description} onChange={e => updateLineItem(item.id, 'description', e.target.value)} placeholder="Cost Node Description" className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black uppercase outline-none focus:border-emerald-500 italic shadow-inner" /></div>
-                  <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Buy</label><input type="number" value={item.buyRate} onChange={e => updateLineItem(item.id, 'buyRate', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black outline-none focus:border-emerald-500 shadow-inner" /></div>
-                  <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block italic">Sell</label><input type="number" value={item.sellRate} onChange={e => updateLineItem(item.id, 'sellRate', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black text-blue-600 outline-none focus:border-emerald-500 shadow-inner" /></div>
-                  <div className="col-span-2 flex justify-end pb-1"><button onClick={() => removeLineItem(item.id)} className="p-3 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="lg:col-span-4">
-          <div className="bg-slate-900 text-white p-12 rounded-[4rem] shadow-2xl sticky top-8 border-t-[12px] border-blue-600 overflow-hidden italic">
-            <div className="absolute -bottom-10 -right-10 opacity-5 transform rotate-45"><Calculator size={240} /></div>
-            <h4 className="text-3xl font-black tracking-tighter uppercase italic mb-12">RESULT STACK</h4>
-            <div className="space-y-10 relative z-10">
-              <div className="p-8 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-inner italic">
-                <div className="flex justify-between items-center mb-4"><span className="text-[10px] text-slate-400 font-bold uppercase italic">Phys. Weight</span><span className="text-xl font-black italic">{metrics.grossWeight.toLocaleString()} KG</span></div>
-                <div className="flex justify-between items-center pt-2 border-t border-white/5"><span className="text-[10px] text-slate-100 font-black uppercase underline decoration-blue-500 underline-offset-4">Chargeable Units</span><span className="text-3xl font-black italic text-blue-400 animate-pulse">{Math.round(metrics.chargeable).toLocaleString()} {modality === 'AIR' ? 'KG' : 'CBM'}</span></div>
-              </div>
-              <div className="text-center italic"><p className="text-[11px] font-black text-blue-400 uppercase tracking-[0.5em] mb-4">Total Offer Value</p><div className="flex items-baseline justify-center gap-2"><span className="text-2xl font-bold text-blue-500 italic">{settings.defaultCurrency}</span><span className="text-6xl font-black tracking-tighter">{Math.round(totals.sell).toLocaleString()}</span></div></div>
-              <div className={`p-6 rounded-3xl border text-center transition-all ${totals.margin < settings.defaultMarginPercent ? 'bg-red-900/40 border-red-800' : 'bg-emerald-900/40 border-emerald-800'}`}><p className="text-[10px] font-black uppercase tracking-widest mb-1 italic">Authorized Yield</p><p className="text-3xl font-black italic">{totals.margin.toFixed(1)}%</p></div>
-              <button onClick={handleOpenReview} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-8 rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-lg transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-6 italic disabled:opacity-50">{loading ? 'Compiling Registry...' : <><Send size={24} /> AUTHORIZE DISPATCH</>}</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {showReviewModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/98 backdrop-blur-3xl p-4 animate-fade-in font-sans italic">
-            <div className="bg-white rounded-[4rem] shadow-2xl w-full max-w-6xl overflow-hidden max-h-[96vh] flex flex-col border-t-[20px] border-blue-600">
-                <div className="bg-slate-50 px-14 py-12 border-b border-slate-200 flex justify-between items-center shrink-0">
-                    <div><h3 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Authorization Review</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] mt-3">Verify commercial signal before global dispatch</p></div>
-                    <button onClick={() => setShowReviewModal(false)} className="p-4 bg-white rounded-2xl border-2 border-slate-100 text-slate-300 hover:text-slate-900 shadow-sm"><X size={28}/></button>
-                </div>
-                <div className="p-14 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-2 gap-14 custom-scrollbar">
-                    <div className="space-y-6">
-                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center italic"><Mail size={16} className="mr-3 text-blue-500"/> Outreach Node Template</h4>
-                        <div className="bg-slate-900 p-10 rounded-[3rem] text-blue-100 italic text-[13px] font-mono leading-relaxed border border-white/5 shadow-inner h-[480px] overflow-y-auto custom-scrollbar">
-                            <p className="text-blue-400 mb-8 border-b border-white/5 pb-4 font-bold uppercase">RE: Commercial Logistics Offer | {originPort} -> {destPort}</p>
-                            <p>To: {customerEmail}</p><br/>
-                            <p>Dear {customerName || 'Strategic Partner'},</p><br/>
-                            <p>Authorization has been granted for the following logistics proposal node.</p><br/>
-                            <div className="bg-white/5 p-6 rounded-2xl border border-white/10 space-y-3"><p>OFFER REFERENCE: <span className="text-white font-bold tracking-widest">{isManualMode ? 'INTERNAL_LOG' : generatedToken.slice(0, 8).toUpperCase()}</span></p><p>TOTAL ALL-IN: <span className="text-white font-bold underline decoration-blue-500 underline-offset-4">{settings.defaultCurrency} {Math.round(totals.sell).toLocaleString()}</span></p></div><br/>
-                            {!isManualMode && <><p>Acceptance Node Access Key:</p><p className="text-blue-400 underline mt-4 break-all">https://uccs-portal.web.app/accept/{generatedToken}</p><br/></>}
-                            <p>OPERATIONS NODE:</p><p>{currentUser.name} | {currentUser.role}</p>
+          <Card title="Terms, Inclusions & Exclusions">
+             <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-3">
+                   <h4 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Inclusions</h4>
+                   <div className="space-y-2">
+                      {activeVersion?.inclusions.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <CheckCircle2 size={14} className="text-emerald-500" /> {item}
                         </div>
+                      ))}
+                      <Button variant="ghost" className="text-[10px] p-1">+ Add Inclusion</Button>
+                   </div>
+                </div>
+                <div className="space-y-3">
+                   <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Exclusions</h4>
+                   <div className="space-y-2">
+                      {activeVersion?.exclusions.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <AlertCircle size={14} className="text-red-400" /> {item}
+                        </div>
+                      ))}
+                      <Button variant="ghost" className="text-[10px] p-1">+ Add Exclusion</Button>
+                   </div>
+                </div>
+             </div>
+          </Card>
+        </div>
+
+        <aside className="space-y-6">
+          <Card title="Job Blueprint" className="bg-slate-50 border-slate-200">
+             <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs">
+                   <span className="text-slate-400 font-bold uppercase">Routing</span>
+                   <span className="font-bold text-slate-700">{job.intakeData.origin} &rarr; {job.intakeData.destination}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                   <span className="text-slate-400 font-bold uppercase">Chargeable</span>
+                   <span className="font-bold text-slate-700">{metrics.chargeableUnits} {job.intakeData.modality === 'AIR' ? 'KG' : 'WM'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                   <span className="text-slate-400 font-bold uppercase">Cargo Value</span>
+                   <span className="font-bold text-slate-700">{job.intakeData.currency} {job.intakeData.cargoValue.toLocaleString()}</span>
+                </div>
+             </div>
+          </Card>
+
+          <Card className="bg-slate-900 border-0" title={<span className="text-white">Commercial Result</span>}>
+             <div className="space-y-6 py-2">
+                <div className="flex justify-between items-center text-white/50 text-xs">
+                   <span>Projected Profit</span>
+                   <span className="text-emerald-400 font-black">{job.intakeData.currency} {(activeVersion?.sellPrice || 0) - (activeVersion?.buyPrice || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2">
+                   <span className="text-white/50 text-xs font-bold uppercase tracking-widest">Applied Margin</span>
+                   <Badge color={((activeVersion?.sellPrice || 1) - (activeVersion?.buyPrice || 0)) / (activeVersion?.sellPrice || 1) * 100 < 15 ? 'red' : 'green'}>
+                      {(((activeVersion?.sellPrice || 1) - (activeVersion?.buyPrice || 0)) / (activeVersion?.sellPrice || 1) * 100).toFixed(1)}%
+                   </Badge>
+                </div>
+             </div>
+          </Card>
+
+          <Card title="Version History">
+             <div className="space-y-4">
+                {job.quoteVersions.length === 0 ? (
+                  <p className="text-xs text-slate-300 italic">No previous versions.</p>
+                ) : job.quoteVersions.map(v => (
+                  <div key={v.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg hover:border-blue-300 transition-colors cursor-pointer" onClick={() => setActiveVersion(v)}>
+                    <div className="flex items-center gap-3">
+                       <History size={14} className="text-slate-300" />
+                       <div>
+                          <p className="text-[10px] font-black text-slate-700 uppercase">Version v{v.version}</p>
+                          <p className="text-[9px] text-slate-400">{new Date(v.createdAt).toLocaleDateString()}</p>
+                       </div>
                     </div>
-                    <div className="space-y-8">
-                        <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center italic"><FileText size={16} className="mr-3 text-indigo-500"/> System Authorisation Registry</h4>
-                        <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 space-y-8 shadow-inner">
-                            <div className="space-y-5"><div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-[10px] font-black text-slate-400 uppercase">Entity Node</span><span className="text-sm font-black text-slate-900">{customerName}</span></div><div className="flex justify-between border-b border-slate-200 pb-2"><span className="text-[10px] font-black text-slate-400 uppercase">Route corridor</span><span className="text-sm font-black text-slate-900">{originPort} / {destPort}</span></div><div className="flex justify-between items-center pt-4"><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Signal Value</span><span className="text-4xl font-black text-slate-900 leading-none">{settings.defaultCurrency} {Math.round(totals.sell).toLocaleString()}</span></div></div>
-                            <div className="p-6 bg-white rounded-3xl border-2 border-slate-100 space-y-4 shadow-sm italic"><div className="flex items-center gap-3 text-emerald-600 mb-2 font-black uppercase text-[10px] tracking-widest"><ShieldCheck size={20}/> LOGIC VERIFIED</div><div className="text-[11px] font-bold text-slate-500 italic leading-relaxed">Cryptographic node mapping verified. Volumetric math cached. Dispatching via mailto gateway.</div></div>
-                        </div>
-                        <div className="pt-6 space-y-4">
-                            <button onClick={handleFinalDispatch} className="w-full py-7 bg-blue-600 hover:bg-blue-700 text-white rounded-3xl text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 transition-all italic flex items-center justify-center gap-5"><Send size={22}/> RELEASE FINAL OFFER</button>
-                            <button onClick={() => setShowReviewModal(false)} className="w-full py-5 bg-white border-3 border-slate-100 text-slate-400 rounded-3xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all italic">ABORT & RETURN</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-      )}
+                    <span className="text-xs font-black text-slate-800">{v.currency} {v.sellPrice.toLocaleString()}</span>
+                  </div>
+                ))}
+             </div>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 };

@@ -13,7 +13,8 @@ const VendorBidPortal: React.FC<{ token: string }> = ({ token }) => {
 
   useEffect(() => {
     const t = tokenService.validate(token);
-    if (t && t.entityType === 'ENQUIRY') {
+    /* Fixed: Comparison fixed to match type 'bid' | 'quote' | 'track' defined in PortalToken */
+    if (t && t.entityType === 'bid') {
        repo.getEnquiries().then(list => {
            const found = list.find(e => e.id === t.entityId);
            setEnquiry(found || null);
@@ -24,14 +25,18 @@ const VendorBidPortal: React.FC<{ token: string }> = ({ token }) => {
   const handleSubmit = async () => {
     if (!enquiry || rate <= 0) return;
     const bid: VendorBid = {
+        /* Standardized mapping for portal submissions */
+        id: `BID-P-${Date.now()}`,
         vendorId: 'PORTAL-SUBMISSION',
         vendorName: 'Agent Portal',
         amount: rate,
         currency: enquiry.currency || 'USD',
         transitTime: transit,
         validityDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+        receivedVia: 'PORTAL',
         receivedAt: new Date().toISOString(),
-        freeTime: 14
+        freeTime: 14,
+        isAwarded: false
     };
     
     enquiry.bids.push(bid);

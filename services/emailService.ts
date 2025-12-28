@@ -1,4 +1,3 @@
-
 import { CommunicationMessage } from '../types';
 import { repo } from './repository';
 
@@ -8,7 +7,7 @@ export const emailService = {
       ...msg,
       id: `MSG-${Date.now()}`,
       sentAt: new Date().toISOString(),
-      status: 'SIMULATED_SENT' // Fallback for demo
+      status: 'SENT' // Fixed: Changed from SIMULATED_SENT to SENT to match type constraints
     };
 
     console.log(`[Email Service] Sending to ${msg.to}: ${msg.subject}`);

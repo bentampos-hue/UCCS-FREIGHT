@@ -1,151 +1,138 @@
-
 import React, { useMemo } from 'react';
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, AreaChart, Area, CartesianGrid, XAxis, YAxis 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid 
 } from 'recharts';
-import { Clock, TrendingUp, Briefcase, Activity, ArrowRight, Target, AlertTriangle, Ship, Plane, Globe, Zap } from 'lucide-react';
-import { ActivityLog, SharedProps, QuoteStatus, AppView, Quotation, VendorEnquiry } from '../types';
+import { TrendingUp, Briefcase, DollarSign, Activity, Package, Globe, BarChart3, ShieldCheck } from 'lucide-react';
+import { Job, SharedProps } from '../types';
+import { Card } from './ui/Card';
+import { Badge } from './ui/Badge';
 
 interface DashboardProps extends SharedProps {
-  activityLog: ActivityLog[];
-  quotations: Quotation[];
-  enquiries: VendorEnquiry[];
-  onNavigateToReports: (filter: QuoteStatus | 'ALL') => void;
+  activityLog: any[];
+  jobs: Job[];
 }
 
 const COLORS = {
-  confirmed: '#10b981',
-  sent: '#3b82f6',
-  lost: '#ef4444',
-  pending: '#f59e0b'
+  shipped: '#3b82f6',
+  quoted: '#94a3b8',
+  done: '#10b981'
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ activityLog, quotations, enquiries, onNavigateToReports, onNavigate, userRole }) => {
-  
-  const statusDistribution = useMemo(() => {
-    const counts = {
-      Confirmed: quotations.filter(q => q.status === 'CONFIRMED').length,
-      Active: quotations.filter(q => q.status === 'SENT' || q.status === 'RENEGOTIATE').length,
-      Pending: quotations.filter(q => q.status === 'PENDING_APPROVAL').length,
-      Lost: quotations.filter(q => q.status === 'LOST' || q.status === 'CANCELLED').length,
-    };
-    return [
-      { name: 'Confirmed', value: counts.Confirmed, color: COLORS.confirmed },
-      { name: 'Active', value: counts.Active, color: COLORS.sent },
-      { name: 'Pending Approval', value: counts.Pending, color: COLORS.pending },
-      { name: 'Lost/Cancelled', value: counts.Lost, color: COLORS.lost },
-    ].filter(item => item.value > 0);
-  }, [quotations]);
+const Dashboard: React.FC<DashboardProps> = ({ activityLog, jobs, settings }) => {
+  const stats = useMemo(() => {
+    const shipped = jobs.filter(j => j.status === 'SHIPMENT').length;
+    const completed = jobs.filter(j => j.status === 'COMPLETED').length;
+    const total = jobs.length;
+    const revenue = jobs.reduce((acc, j) => {
+        const accepted = j.quoteVersions.find(q => q.status === 'CONFIRMED' || q.status === 'SENT');
+        return acc + (accepted?.sellPrice || 0);
+    }, 0);
+    const profit = jobs.reduce((acc, j) => {
+        const accepted = j.quoteVersions.find(q => q.status === 'CONFIRMED');
+        return acc + (accepted ? (accepted.sellPrice - accepted.buyPrice) : 0);
+    }, 0);
+    return { total, shipped, completed, revenue, profit, margin: revenue > 0 ? (profit / revenue) * 100 : 0 };
+  }, [jobs]);
 
-  const shipmentStats = useMemo(() => {
-    const confirmed = quotations.filter(q => q.status === 'CONFIRMED');
-    const stats = { booked: 0, transit: 0, cleared: 0, delivered: 0, exception: 0 };
-    confirmed.forEach(q => {
-        const latest = q.milestones?.[0]?.status || 'BOOKING_CONFIRMED';
-        if (latest === 'EXCEPTION') stats.exception++;
-        else if (latest === 'DELIVERED') stats.delivered++;
-        else if (latest === 'CUSTOMS_CLEARED') stats.cleared++;
-        else if (['CARGO_PICKED_UP', 'DEPARTED_POL', 'ARRIVED_POD', 'FLIGHT_DEPARTED', 'FLIGHT_ARRIVED'].includes(latest)) stats.transit++;
-        else stats.booked++;
-    });
-    return stats;
-  }, [quotations]);
+  const pieData = [
+    { name: 'In Transit', value: stats.shipped, color: COLORS.shipped },
+    { name: 'Completed', value: stats.completed, color: COLORS.done },
+    { name: 'Draft/Quoting', value: stats.total - stats.shipped - stats.completed, color: COLORS.quoted },
+  ].filter(x => x.value > 0);
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      <div className="bg-indigo-900 text-white p-8 rounded-[2rem] shadow-2xl relative overflow-hidden border-b-8 border-indigo-700">
-        <div className="absolute top-0 right-0 p-12 opacity-10"><Zap size={140} /></div>
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
-            <div>
-                <h3 className="text-3xl font-black tracking-tight mb-2 uppercase italic">Operations Control Center</h3>
-                <p className="text-indigo-300 font-medium max-w-lg">Monitoring {quotations.length} active multi-modal corridors across global trade lanes.</p>
-            </div>
-            <div className="flex gap-4">
-                <div className="bg-white/10 p-5 rounded-3xl border border-white/10 backdrop-blur-md">
-                    <p className="text-[10px] font-black text-indigo-400 uppercase mb-1 tracking-widest text-center">Sea Port Volume</p>
-                    <div className="flex items-baseline justify-center space-x-2">
-                        <Ship size={14} className="text-blue-400" />
-                        <span className="text-2xl font-black">{quotations.filter(q => q.modality === 'SEA').length}</span>
-                    </div>
-                </div>
-                <div className="bg-white/10 p-5 rounded-3xl border border-white/10 backdrop-blur-md">
-                    <p className="text-[10px] font-black text-indigo-400 uppercase mb-1 tracking-widest text-center">Air Hub Volume</p>
-                    <div className="flex items-baseline justify-center space-x-2">
-                        <Plane size={14} className="text-indigo-400" />
-                        <span className="text-2xl font-black">{quotations.filter(q => q.modality === 'AIR').length}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div className="max-w-screen-2xl mx-auto px-10 pb-24 animate-slide-up">
+      <header className="py-16">
+        <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">Analytics Console</h1>
+        <p className="text-slate-500 text-base mt-2 font-medium max-w-2xl leading-relaxed">Platform performance architecture and commercial node liquidity telemetry.</p>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-10 mb-16">
+        <Card className="group hover:-translate-y-2 transition-all p-10 border-white/20">
+           <div className="flex items-center gap-4 text-blue-600 mb-8">
+              <div className="p-3 bg-blue-50 rounded-2xl ring-1 ring-blue-100 shadow-sm"><DollarSign size={20} /></div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] italic">Revenue Forecast</span>
+           </div>
+           <div className="flex items-baseline gap-3">
+              <span className="text-4xl font-bold text-slate-900 tracking-tighter">{stats.revenue.toLocaleString()}</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{settings.baseCurrency}</span>
+           </div>
+        </Card>
+        <Card className="group hover:-translate-y-2 transition-all p-10 border-white/20">
+           <div className="flex items-center gap-4 text-emerald-600 mb-8">
+              <div className="p-3 bg-emerald-50 rounded-2xl ring-1 ring-emerald-100 shadow-sm"><TrendingUp size={20} /></div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] italic">Target Margin</span>
+           </div>
+           <div className="flex items-baseline gap-3">
+              <span className="text-4xl font-bold text-slate-900 tracking-tighter">{stats.margin.toFixed(1)}</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">% YIELD SIGNAL</span>
+           </div>
+        </Card>
+        <Card className="group hover:-translate-y-2 transition-all p-10 border-white/20">
+           <div className="flex items-center gap-4 text-slate-500 mb-8">
+              <div className="p-3 bg-slate-50 rounded-2xl ring-1 ring-slate-100 shadow-sm"><Briefcase size={20} /></div>
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] italic">Active Projects</span>
+           </div>
+           <div className="flex items-baseline gap-3">
+              <span className="text-4xl font-bold text-slate-900 tracking-tighter">{stats.total}</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">PROTOCOL NODES</span>
+           </div>
+        </Card>
       </div>
 
-      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-10">
-          <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-8 flex items-center">
-              <Activity className="mr-3 text-indigo-600" size={18}/> Live Logistics Pulse
-          </h4>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
-              {[
-                { label: 'Booked', val: shipmentStats.booked, color: 'slate' },
-                { label: 'In Transit', val: shipmentStats.transit, color: 'blue' },
-                { label: 'Customs', val: shipmentStats.cleared, color: 'violet' },
-                { label: 'Delivered', val: shipmentStats.delivered, color: 'emerald' },
-                { label: 'Exceptions', val: shipmentStats.exception, color: 'red' }
-              ].map((stat, i) => (
-                <div key={i} className={`p-6 rounded-3xl border border-slate-100 bg-${stat.color}-50/30 transition-all hover:shadow-lg`}>
-                    <p className={`text-[10px] font-black uppercase mb-2 tracking-widest text-${stat.color}-600`}>{stat.label}</p>
-                    <p className={`text-4xl font-black text-${stat.color}-900`}>{stat.val}</p>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <div className="lg:col-span-8">
+          <Card title="Traffic Performance Signal" className="h-[520px] border-white/20">
+            <div className="h-[400px] mt-8 pr-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={[
+                    { name: 'Node A', v: 400 }, { name: 'Node B', v: 320 }, { name: 'Node C', v: 640 },
+                    { name: 'Node D', v: 480 }, { name: 'Node E', v: 820 }, { name: 'Node F', v: 740 },
+                    { name: 'Node G', v: 960 }
+                ]}>
+                  <defs>
+                    <linearGradient id="areaColor" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 600}} dy={15} />
+                  <YAxis hide />
+                  <Area type="monotone" dataKey="v" stroke="#3b82f6" fill="url(#areaColor)" strokeWidth={3} animationDuration={1500} />
+                  <Tooltip 
+                    contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 12px 40px rgba(0,0,0,0.1)', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)'}}
+                    itemStyle={{fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase'}}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+        <div className="lg:col-span-4">
+          <Card title="Architecture Integrity" className="h-[520px] border-white/20">
+            <div className="h-[300px] mt-10 flex justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={pieData} innerRadius={80} outerRadius={110} paddingAngle={10} dataKey="value" stroke="none">
+                    {pieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-12 space-y-5 px-4">
+              {pieData.map((x, i) => (
+                <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 border border-black/[0.02]">
+                  <div className="flex items-center gap-4">
+                    <div className="w-3 h-3 rounded-full shadow-sm" style={{backgroundColor: x.color}}></div>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{x.name}</span>
+                  </div>
+                  <span className="text-sm font-bold text-slate-900 tracking-tight">{x.value} Files</span>
                 </div>
               ))}
-          </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
-            <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-200 h-96">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-10">Revenue Projections</h4>
-                <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={[
-                        { m: 'Jan', s: 4000, a: 2400 },
-                        { m: 'Feb', s: 3000, a: 1398 },
-                        { m: 'Mar', s: 2000, a: 9800 },
-                        { m: 'Apr', s: 2780, a: 3908 },
-                        { m: 'May', s: 1890, a: 4800 },
-                    ]}>
-                        <defs>
-                            <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/></linearGradient>
-                            <linearGradient id="air" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/><stop offset="95%" stopColor="#6366f1" stopOpacity={0}/></linearGradient>
-                        </defs>
-                        <XAxis dataKey="m" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
-                        <Area type="monotone" dataKey="s" stroke="#3b82f6" fill="url(#sea)" strokeWidth={3} />
-                        <Area type="monotone" dataKey="a" stroke="#6366f1" fill="url(#air)" strokeWidth={3} />
-                        <Tooltip />
-                    </AreaChart>
-                </ResponsiveContainer>
             </div>
-        </div>
-
-        <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
-          <div className="p-8 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em] flex items-center">
-              <Activity className="mr-3 text-indigo-600" size={16} /> Activity Stream
-            </h4>
-          </div>
-          <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-            {activityLog.map((log) => (
-                <div key={log.id} className="flex gap-4 group">
-                    <div className="mt-1">
-                        <div className={`w-3 h-3 rounded-full border-4 border-white shadow-sm ${log.action.includes('Awarded') ? 'bg-emerald-500' : 'bg-blue-500'}`}></div>
-                    </div>
-                    <div>
-                        <p className="text-sm font-bold text-slate-800 tracking-tight leading-snug">{log.description}</p>
-                        <div className="flex items-center gap-3 mt-1.5">
-                            <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded tracking-widest">{log.module}</span>
-                            <span className="text-[10px] text-slate-300 font-black">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                    </div>
-                </div>
-            ))}
-          </div>
+          </Card>
         </div>
       </div>
     </div>

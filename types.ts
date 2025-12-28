@@ -1,87 +1,35 @@
+
 export enum AppView {
   LOGIN = 'login',
   DASHBOARD = 'dashboard',
-  SIMULATOR = 'simulator',
+  PROJECT_CENTER = 'project_center',
+  CRM = 'crm',
   VENDORS = 'vendors',
   REPORTS = 'reports',
-  CRM = 'crm',
-  ENQUIRY = 'enquiry',
   SETTINGS = 'settings',
-  APPROVALS = 'approvals',
-  AUDIT = 'audit',
-  VENDOR_PORTAL = 'vendor_portal',
-  CUSTOMER_PORTAL = 'customer_portal',
-  TRACKING_PORTAL = 'tracking_portal'
+  AUDIT = 'audit'
 }
 
-export type UserRole = 'ADMIN' | 'MANAGER' | 'SALES' | 'OPS';
-export type Modality = 'SEA' | 'AIR';
+export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'OPERATOR' | 'SALES' | 'FINANCE' | 'VIEWER' | 'MANAGER' | 'OPS';
+export type Modality = 'SEA' | 'AIR' | 'COURIER' | 'ROAD';
 export type Currency = 'USD' | 'EUR' | 'GBP' | 'CNY' | 'AED';
-export type QuoteStatus = 'SENT' | 'CONFIRMED' | 'LOST' | 'PENDING_APPROVAL' | 'RENEGOTIATE' | 'CANCELLED';
-export type EnquiryStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'BID_RECEIVED' | 'AWARDED' | 'CLOSED';
-export type ShipmentMilestoneStatus = 'BOOKING_CONFIRMED' | 'CARGO_PICKED_UP' | 'DEPARTED_POL' | 'AT_SEA' | 'ARRIVED_POD' | 'FLIGHT_DEPARTED' | 'FLIGHT_ARRIVED' | 'CUSTOMS_CLEARED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
+export type JobStatus = 'DRAFT' | 'INTAKE' | 'MARKET' | 'QUOTES' | 'AWARDED' | 'SHIPMENT' | 'COMPLETED' | 'CANCELLED';
 export type PackagingType = 'PALLET' | 'BOX' | 'CRATE' | 'LOOSE' | 'CONTAINER';
 
-export interface DraftState {
-  formId: string;
-  data: any;
-  lastSaved: string;
-}
-
-export interface PackagingLine {
-  id: string;
-  type: PackagingType;
-  quantity: number;
-  length: number;
-  width: number;
-  height: number;
-  weightPerUnit: number;
-  description: string;
-}
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  password?: string;
-  lastLogin?: string;
-}
-
-export interface Contact {
-  id: string;
-  name: string;
-  role: string;
-  email: string;
-  phone: string;
-  isPrimary: boolean;
-}
-
-export interface Address {
+export interface Permission {
   id: string;
   label: string;
-  type: 'Billing' | 'Shipping' | 'Both';
-  street: string;
-  city: string;
-  country: string;
-  zip: string;
+  key: 'MANAGE_USERS' | 'DELETE_ALL' | 'EDIT_SETTINGS' | 'OVERRIDE_PHASE' | 'APPROVE_DISCOUNT' | 'VIEW_AUDIT' | 'MANAGE_API' | 'BULK_IMPORT';
 }
 
-export interface PortalToken {
-  token: string;
-  entityId: string;
-  entityType: 'ENQUIRY' | 'QUOTE' | 'SHIPMENT';
-  expiry: string;
-  recipientEmail: string;
-  createdAt: string;
-}
-
-export interface ActivityLog {
+export interface InternalMessage {
   id: string;
   timestamp: string;
-  module: string;
-  action: string;
-  description: string;
+  sender: string;
+  recipientIds: string[];
+  subject: string;
+  body: string;
+  status: 'SENT' | 'VIEWED' | 'REPLIED';
 }
 
 export interface CommunicationMessage {
@@ -90,113 +38,164 @@ export interface CommunicationMessage {
   subject: string;
   body: string;
   sentAt: string;
-  status: 'QUEUED' | 'SENT' | 'FAILED' | 'SIMULATED_SENT';
-  type: 'ENQUIRY' | 'QUOTE' | 'MILESTONE' | 'APPROVAL';
-  referenceId: string;
+  status: 'DRAFT' | 'QUEUED' | 'SENT' | 'FAILED';
+  type: 'RFQ' | 'QUOTE' | 'GENERAL';
+  operatorId: string;
+  attachments?: string[]; 
 }
 
-export interface Milestone {
-  status: ShipmentMilestoneStatus | string;
-  date: string;
-  notes?: string;
-  updatedBy: string;
-  location?: string;
-  isAutomated?: boolean;
-}
-
-export interface Quotation {
-  id: string;
-  portalToken?: string;
-  isManual?: boolean;
-  modality: Modality;
-  customerId: string;
-  customerName: string;
-  customerEmail: string;
-  origin: string;
-  destination: string;
-  originAddress?: string;
-  destinationAddress?: string;
-  amount: number;
-  buyRate: number;
-  margin: number;
-  currency: Currency;
-  status: QuoteStatus;
-  date: string;
-  cargoType?: string;
-  cargoLines?: PackagingLine[];
-  milestones?: Milestone[];
-  sourceEnquiryId?: string;
-  sourceBidId?: string;
-  linkedJobId?: string;
-  approvalComments?: string;
-  details?: {
-    weight?: number;
-    volume?: number;
-    chargeable?: number;
-    equipment?: string;
+export interface AppSettings {
+  companyName: string;
+  baseCurrency: Currency;
+  exchangeRates: Record<Currency, number>;
+  defaultMarginPercent: number;
+  minMarginThreshold: number;
+  emailSignature: string;
+  numbering: { jobPrefix: string; accountPrefix: string; vendorPrefix: string };
+  legalTerms: {
+    version: string;
+    general: string;
+    air: string;
+    sea: string;
+    courier: string;
+    lastUpdated: string;
+  };
+  commercialParameters: {
+    sea: { lclMinCbm: number; wmRule: number; docFee: number; defaultLocalCharges: number };
+    air: { volumetricFactor: number; minChargeableWeight: number; defaultSurcharges: number };
   };
 }
 
-export interface Shipment {
+export interface CargoLine {
   id: string;
-  quoteId: string;
-  trackingToken: string;
-  status: ShipmentMilestoneStatus;
+  type: PackagingType;
+  qty: number;
+  length: number;
+  width: number;
+  height: number;
+  weight: number; 
+  description: string;
+  isStackable: boolean;
+  notes?: string;
+}
+
+export interface IntakeData {
   modality: Modality;
-  customerName: string;
   origin: string;
   destination: string;
-  milestones: Milestone[];
-  cargoLines: PackagingLine[];
-  documents: { id: string; name: string; type: string; url: string; uploadedAt: string }[];
-  hblReference?: string;
-  mblReference?: string;
-  containerNumber?: string;
+  pickupAddress: string;
+  deliveryAddress: string;
+  incoterms: string;
+  readyDate: string;
+  validityDate?: string;
+  commodity: string;
+  hsCode?: string;
+  cargoLines: CargoLine[];
+  cargoValue: number;
+  currency: Currency;
+  isDG: boolean;
+  dgDetails?: { un: string; class: string; pg: string };
+  tempControl: boolean;
+  tempRange?: string;
+  handlingNotes: string;
+  insuranceRequested: boolean;
+  shipperId: string;
+  consigneeId: string;
+  transitPriority: string;
+  
+  seaDetails?: { type: 'FCL' | 'LCL'; containerType: string; vessel?: string; cutoff?: string };
+  airDetails?: { airportOrigin: string; airportDest: string; airline?: string; chargeableWeightLogic: 'KG' | 'WM' };
+  courierDetails?: { serviceLevel: 'Express' | 'Economy'; accountNo?: string; isDoorToDoor: boolean };
+  roadDetails?: { truckType: 'FTL' | 'LTL'; vehicleType: string; isTemperatureControlled: boolean };
+
+  customsClearance: boolean;
+  lastMileDelivery: boolean;
+  packingRequired: boolean;
 }
 
 export interface VendorBid {
+  id: string;
   vendorId: string;
   vendorName: string;
   amount: number;
-  currency: Currency;
+  currency: string;
   transitTime: number;
   validityDate: string;
+  receivedVia: string;
   receivedAt: string;
-  freeTime?: number;
+  freeTime: number;
+  isAwarded: boolean;
 }
 
-export interface VendorEnquiry {
+export interface QuoteLine {
   id: string;
-  portalToken: string;
-  modality: Modality;
-  reference: string;
-  status: EnquiryStatus;
-  vendorsSentTo: string[];
-  bids: VendorBid[];
-  sentDate: string;
-  origin: string;
-  destination: string;
-  pickupZip?: string;
-  deliveryZip?: string;
-  commodity: string;
-  cargoLines: PackagingLine[];
-  incoterms?: string;
-  readyDate?: string;
-  currency?: Currency;
-  targetRate?: number;
-  equipmentType?: string;
-  equipmentCount?: number;
+  description: string;
+  amount: number;
+  currency: Currency;
+  type: 'FREIGHT' | 'SURCHARGE' | 'LOCAL' | 'DUTY';
 }
 
-export interface Vendor {
+export interface QuoteVersion {
+  id: string;
+  version: number;
+  sellPrice: number;
+  buyPrice: number;
+  margin: number;
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'CONFIRMED';
+  validUntil: string;
+  createdAt: string;
+  buySource?: string;
+  currency?: Currency;
+  inclusions: string[];
+  exclusions: string[];
+  createdBy?: string;
+  lines?: QuoteLine[];
+  transitEstimate?: number;
+  serviceLevel?: string;
+}
+
+export interface Job {
+  id: string;
+  reference: string; 
+  status: JobStatus;
+  intakeData: IntakeData;
+  invitedVendorIds: string[];
+  messages: InternalMessage[];
+  completenessScore: number;
+  quoteVersions: QuoteVersion[];
+  vendorBids: VendorBid[];
+  ownerId: string;
+  createdAt: string;
+  updatedAt: string;
+  shipmentDetails?: Shipment;
+}
+
+export interface User {
   id: string;
   name: string;
-  tier: 'Standard' | 'Premium';
-  lanes: string[];
-  apiReady: boolean;
-  contractExpiry: string;
-  contacts: Contact[];
-  addresses: Address[];
+  email: string;
+  role: UserRole;
+  status: 'ACTIVE' | 'DISABLED';
+  password?: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role?: string;
+}
+
+export interface Address {
+  id: string;
+  label: string;
+  street: string;
+  city: string;
+  country: string;
+  zip?: string;
+  building?: string;
+  poBox?: string;
 }
 
 export interface Customer {
@@ -208,56 +207,16 @@ export interface Customer {
   notes?: string;
 }
 
-export interface CommercialParameters {
-  sea: {
-    lclMinCbm: number;
-    wmRule: number;
-    docFee: number;
-    defaultLocalCharges: number;
-  };
-  air: {
-    volumetricFactor: number;
-    minChargeableWeight: number;
-    defaultSurcharges: number;
-  };
-}
-
-export interface AppSettings {
-  companyName: string;
-  defaultCurrency: Currency;
-  defaultMarginPercent: number;
-  emailProvider?: string;
-  emailSignature: string;
-  commercialParameters: CommercialParameters;
-}
-
-export interface QuoteRequest {
-  modality: Modality;
-  origin: string;
-  destination: string;
-  originAddress?: string;
-  destinationAddress?: string;
-  cargoType: string;
-  cargoLines?: PackagingLine[];
-  weight?: number;
-  volume?: number;
-  etd?: string;
-  transitTime?: number;
-  buyRate: number;
-  margin: number;
-  currency: Currency;
-  customerEmail: string;
-  lineItems: { description: string; amount: number; quantity: number }[];
-  sourceRef?: string;
-  sourceVendor?: string;
-  sourceVendorId?: string;
-  sourceEnquiryId?: string;
-}
-
-export interface WorkflowContext {
-  sourceType: 'ENQUIRY' | 'CLONE' | null;
-  sourceId: string | null;
-  payload: QuoteRequest | null;
+export interface Vendor {
+  id: string;
+  name: string;
+  tier: 'Standard' | 'Premium';
+  lanes: string[];
+  apiReady: boolean;
+  contractExpiry: string;
+  contacts: Contact[];
+  addresses: Address[];
+  capabilities: Modality[];
 }
 
 export interface SharedProps {
@@ -265,17 +224,9 @@ export interface SharedProps {
   userRole: UserRole;
   currentUser: User;
   onNotify: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
-  onLogActivity: (module: string, action: string, description: string) => void;
-  onNavigate: (view: AppView) => void;
-}
-
-export interface ApprovalRequest {
-  id: string;
-  quoteId: string;
-  requestedBy: string;
-  requestedAt: string;
-  margin: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  onNavigate: (view: AppView, params?: any) => void;
+  hasPermission: (key: Permission['key']) => boolean;
+  onLogActivity: (message: string, action: string, type: string, id: string) => void;
 }
 
 export interface AuditLog {
@@ -287,4 +238,68 @@ export interface AuditLog {
   entityType: string;
   entityId: string;
   changes: string;
+}
+
+export interface Quotation {
+  id: string;
+  customerName: string;
+  origin: string;
+  destination: string;
+  modality: Modality;
+  amount: number;
+  buyRate: number;
+  currency: Currency;
+  margin: number;
+  status: 'SENT' | 'CONFIRMED' | 'PENDING_APPROVAL' | 'LOST' | 'CANCELLED';
+  date: string;
+  validUntil: string;
+  cargoType?: string;
+}
+
+export interface Shipment {
+  id: string;
+  status: string;
+  origin: string;
+  destination: string;
+  modality: Modality;
+  trackingNumber?: string;
+  carrier?: string;
+  etd?: string;
+  eta?: string;
+  milestones: {
+    date: string;
+    status: string;
+    notes?: string;
+  }[];
+}
+
+export interface PortalToken {
+  token: string;
+  entityId: string;
+  entityType: 'bid' | 'quote' | 'track';
+  createdAt: string;
+  expiry: string;
+  recipientEmail: string;
+}
+
+export interface DraftState {
+  formId: string;
+  data: any;
+  lastSaved: string;
+}
+
+// Fixed: Added VendorEnquiry interface to resolve export errors
+export interface VendorEnquiry {
+  id: string;
+  reference: string;
+  origin: string;
+  destination: string;
+  modality: Modality;
+  commodity: string;
+  equipmentCount: number;
+  equipmentType: string;
+  incoterms: string;
+  currency: Currency;
+  status: string;
+  bids: VendorBid[];
 }

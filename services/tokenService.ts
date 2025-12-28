@@ -1,7 +1,9 @@
+
 import { PortalToken } from '../types';
 
 export const tokenService = {
-  generate: (entityId: string, type: 'ENQUIRY' | 'QUOTE' | 'SHIPMENT', email: string): string => {
+  /* Fixed: Signature now uses 'bid' | 'quote' | 'track' to match PortalToken definition */
+  generate: (entityId: string, type: 'bid' | 'quote' | 'track', email: string): string => {
     // Cryptographically secure random hex string
     const array = new Uint32Array(4);
     window.crypto.getRandomValues(array);

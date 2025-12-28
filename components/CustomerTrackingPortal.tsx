@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { repo } from '../services/repository';
 import { tokenService } from '../services/tokenService';
@@ -10,7 +11,8 @@ const CustomerTrackingPortal: React.FC<{ token: string }> = ({ token }) => {
 
   useEffect(() => {
     const t = tokenService.validate(token);
-    if (t && t.entityType === 'SHIPMENT') {
+    /* Fixed: Comparison fixed to match type 'bid' | 'quote' | 'track' defined in PortalToken */
+    if (t && t.entityType === 'track') {
         repo.getShipments().then(list => {
             const found = list.find(s => s.id === t.entityId);
             setShipment(found || null);
@@ -67,6 +69,7 @@ const CustomerTrackingPortal: React.FC<{ token: string }> = ({ token }) => {
                         <div className="absolute -bottom-10 -right-10 opacity-10"><Package size={140}/></div>
                         <h4 className="text-[11px] font-black text-blue-400 uppercase tracking-[0.5em] mb-10 border-b border-white/5 pb-4 italic">Registry Metadata</h4>
                         <div className="space-y-6">
+                            {/* Fixed: origin, destination and modality are now correctly part of Shipment interface and type safe */}
                             <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic mb-1">Trade Corridor</p><p className="text-lg font-black italic uppercase tracking-tighter">{shipment.origin} &rarr; {shipment.destination}</p></div>
                             <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic mb-1">Mode Architecture</p><p className="text-lg font-black italic uppercase tracking-tighter">{shipment.modality} FREIGHT</p></div>
                             <div className="pt-4 border-t border-white/5 flex gap-4">

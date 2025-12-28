@@ -1,318 +1,165 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
-  Users, 
-  Search, 
-  Plus, 
-  Save, 
-  X, 
-  Phone, 
-  Mail, 
-  Building, 
-  Star, 
-  Edit2, 
-  Trash2, 
-  User, 
-  Download, 
-  FileUp, 
-  ShieldCheck,
-  MoreHorizontal
+  Users, Search, Plus, X, Building, User, MapPin, Trash2, History, ChevronRight, 
+  Mail, Phone, CheckSquare, Square, Download, MoreHorizontal, Globe, ArrowRight, ArrowLeft, Briefcase, FileText, Save
 } from 'lucide-react';
-import { Customer, Contact, Address, SharedProps } from '../types';
-import { csvHelper } from '../services/csvHelper';
+import { Customer, SharedProps, Address, Contact, Job } from '../types';
+import { Button } from './ui/Button';
+import { Card } from './ui/Card';
+import { Badge } from './ui/Badge';
 import { repo } from '../services/repository';
 
 interface CRMProps extends SharedProps {
   customers: Customer[];
+  jobs: Job[];
   onAddCustomer: (customer: Customer) => void;
   onUpdateCustomer: (customer: Customer) => void;
+  onDeleteCustomer: (id: string) => void;
 }
 
-const CRM: React.FC<CRMProps> = ({ customers, onAddCustomer, onUpdateCustomer, onNotify, currentUser, onLogActivity }) => {
+const CRM: React.FC<CRMProps> = ({ 
+  customers, jobs, onAddCustomer, onUpdateCustomer, onDeleteCustomer, onNotify, currentUser
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'DETAILS' | 'CONTACTS' | 'ADDRESSES'>('DETAILS');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const [formData, setFormData] = useState<Customer>({
-    id: '',
-    companyName: '',
-    tier: 'Regular',
-    contacts: [],
-    addresses: [],
-    notes: ''
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'DETAILS' | 'CONTACTS' | 'ADDRESSES' | 'HISTORY'>('DETAILS');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [formData, setFormData] = useState<Customer>({ 
+    id: '', companyName: '', tier: 'Regular', contacts: [], addresses: [], notes: '' 
   });
 
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
   const filteredCustomers = customers.filter(c => 
-    c.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.contacts.some(contact => contact.name.toLowerCase().includes(searchTerm.toLowerCase()) || contact.email.toLowerCase().includes(searchTerm.toLowerCase()))
+    c.companyName.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleOpenModal = (customer?: Customer) => {
-    setActiveTab('DETAILS');
-    if (customer) {
-      setEditingId(customer.id);
-      setFormData(JSON.parse(JSON.stringify(customer)));
-    } else {
-      setEditingId(null);
-      setFormData({ 
-        id: '', 
-        companyName: '', 
-        tier: 'Regular', 
-        contacts: [], 
-        addresses: [],
-        notes: '' 
-      });
-    }
-    setIsModalOpen(true);
+  const handleOpenDrawer = (c?: Customer) => {
+    setDrawerTab('DETAILS');
+    if (c) setFormData({ ...c }); 
+    else setFormData({ id: `ACC-${Date.now()}`, companyName: '', tier: 'Regular', contacts: [], addresses: [], notes: '' });
+    setIsDrawerOpen(true);
   };
 
-  const handleSave = () => {
-    if (!formData.companyName) return;
-    const newCustomer: Customer = {
-      ...formData,
-      id: editingId || `C${String(customers.length + 1).padStart(3, '0')}`,
-    };
-    if (editingId) onUpdateCustomer(newCustomer);
-    else onAddCustomer(newCustomer);
-    setIsModalOpen(false);
-    setEditingId(null);
-  };
-
-  const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleSaveEntity = async () => {
+    if (!formData.companyName) return onNotify('error', 'Legal Entity Name Required.');
     try {
-      const text = await file.text();
-      const data = csvHelper.parseCSV(text);
-      
-      if (data.length === 0) {
-        onNotify('error', 'CSV parse failed: File is empty or headers mismatch.');
-        return;
-      }
-
-      const importedCustomers: Customer[] = data.map((row, idx) => {
-        const id = `C-IMP-${Date.now()}-${idx}`;
-        return {
-          id,
-          companyName: row.companyName || 'Imported Account',
-          tier: (row.tier === 'VIP' ? 'VIP' : 'Regular'),
-          contacts: row.primaryContactEmail ? [{
-            id: `CON-${id}`,
-            name: row.primaryContactName || 'Primary Contact',
-            email: row.primaryContactEmail,
-            phone: row.primaryContactPhone || '',
-            role: 'Imported',
-            isPrimary: true
-          }] : [],
-          addresses: [],
-          notes: 'Batch Import: ' + new Date().toLocaleDateString()
-        };
-      });
-
-      await repo.saveItemsBulk('customers', importedCustomers, currentUser);
-      onNotify('success', `Import successful: ${importedCustomers.length} corporate records added.`);
-      onLogActivity('CRM', 'Mass Import', `Uploaded ${importedCustomers.length} accounts via CSV.`);
-      
-      // Force reload or state update would happen here. For demo, we rely on parent update.
-      window.location.reload(); 
-    } catch (err) {
-      onNotify('error', 'Critical error during CSV processing.');
+      await repo.saveItem('customers', formData, currentUser);
+      const isNew = !customers.find(c => c.id === formData.id);
+      if (isNew) onAddCustomer(formData);
+      else onUpdateCustomer(formData);
+      setIsDrawerOpen(false);
+      onNotify('success', 'Account Node Protocol Synchronized.');
+    } catch (e) {
+      onNotify('error', 'Persistence Protocol Error.');
     }
   };
-
-  const addContact = () => {
-    setFormData(prev => ({
-      ...prev,
-      contacts: [...prev.contacts, { id: Date.now().toString(), name: '', role: '', email: '', phone: '', isPrimary: prev.contacts.length === 0 }]
-    }));
-  };
-
-  const updateContact = (index: number, field: keyof Contact, value: any) => {
-    const newContacts = [...formData.contacts];
-    if (field === 'isPrimary' && value === true) newContacts.forEach(c => c.isPrimary = false);
-    newContacts[index] = { ...newContacts[index], [field]: value };
-    setFormData(prev => ({ ...prev, contacts: newContacts }));
-  };
-
-  const addAddress = () => {
-    setFormData(prev => ({
-      ...prev,
-      addresses: [...prev.addresses, { id: Date.now().toString(), label: 'HQ', type: 'Both', street: '', city: '', country: '', zip: '' }]
-    }));
-  };
-
-  const updateAddress = (index: number, field: keyof Address, value: any) => {
-    const newAddresses = [...formData.addresses];
-    newAddresses[index] = { ...newAddresses[index], [field]: value };
-    setFormData(prev => ({ ...prev, addresses: newAddresses }));
-  };
-
-  const getPrimaryContact = (c: Customer) => c.contacts.find(x => x.isPrimary) || c.contacts[0];
 
   return (
-    <div className="space-y-8 animate-fade-in pb-20">
-      <div className="bg-purple-900 text-white p-12 rounded-[3.5rem] shadow-2xl relative overflow-hidden border-b-[16px] border-purple-700">
-        <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Users size={280} /></div>
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
-          <div>
-            <h3 className="text-5xl font-black tracking-tighter mb-4 italic uppercase">Corporate CRM</h3>
-            <p className="text-purple-300 font-bold uppercase tracking-[0.3em] text-[10px]">Strategic Client Ecosystem</p>
-          </div>
-          <div className="flex gap-4">
-            <button onClick={() => csvHelper.downloadTemplate('CUSTOMERS')} className="px-8 py-3 bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all flex items-center gap-2 italic">
-              <Download size={14}/> Template
-            </button>
-            <button onClick={() => fileInputRef.current?.click()} className="px-8 py-3 bg-indigo-600 border border-indigo-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 transition-all flex items-center gap-2 italic shadow-xl">
-              <FileUp size={14}/> Bulk Load
-            </button>
-            <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleCSVImport} />
-          </div>
+    <div className="max-w-[1600px] mx-auto px-10 pb-24 animate-slide-up h-full flex flex-col italic font-bold">
+      <header className="flex justify-between items-center py-16 shrink-0">
+        <div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Account Registry</h1>
+          <p className="text-slate-400 text-sm mt-2 font-bold italic tracking-widest uppercase opacity-60">Canonical Entity Architecture</p>
         </div>
-      </div>
-
-      <div className="bg-white rounded-[4rem] shadow-sm border border-slate-200 flex flex-col min-h-[600px] overflow-hidden">
-        <div className="p-8 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/30">
-          <div className="relative w-full md:w-[500px] group">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-purple-600 transition-colors" size={20} />
-            <input 
-              type="text" 
-              placeholder="Search Entities, Contacts, or Domains..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-14 pr-6 py-4 border-2 border-slate-100 rounded-3xl text-sm font-black outline-none focus:border-purple-400 shadow-inner bg-white uppercase transition-all"
-            />
-          </div>
-          <button 
-            onClick={() => handleOpenModal()}
-            className="flex items-center gap-4 px-10 py-4 bg-slate-900 text-white rounded-3xl text-[11px] font-black uppercase tracking-widest hover:bg-purple-700 transition-all shadow-2xl italic active:scale-95"
-          >
-            <Plus size={18} />
-            <span>Add Customer Account</span>
-          </button>
+        <div className="flex gap-4 items-center">
+           <div className="relative">
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Filter Directory..." className="pl-12 pr-6 py-3.5 bg-white border-2 border-slate-100 rounded-2xl text-sm focus:ring-8 focus:ring-blue-50 transition-all w-80 outline-none italic font-bold"/>
+           </div>
+           <Button onClick={() => handleOpenDrawer()} className="rounded-2xl px-10 py-4 shadow-2xl shadow-blue-500/10 active:scale-95 transition-all"><Plus size={20}/> New Account</Button>
         </div>
+      </header>
 
-        <div className="p-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-          {filteredCustomers.map(customer => {
-            const primary = getPrimaryContact(customer);
-            return (
-              <div key={customer.id} className="bg-white rounded-[2.5rem] border-2 border-slate-50 hover:border-purple-200 hover:shadow-2xl transition-all p-8 group relative overflow-hidden">
-                <div className="flex justify-between items-start mb-8">
-                  <div className="flex items-center gap-5">
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-black italic shadow-lg ${customer.tier === 'VIP' ? 'bg-amber-100 text-amber-700 border-2 border-amber-200' : 'bg-slate-100 text-slate-600 border-2 border-slate-200'}`}>
-                      {customer.companyName.charAt(0)}
-                    </div>
-                    <div>
-                      <h4 className="font-black text-slate-900 uppercase italic tracking-tighter text-lg leading-tight">{customer.companyName}</h4>
-                      <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest mt-1">{customer.id}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => handleOpenModal(customer)} className="p-3 text-slate-300 hover:text-purple-600 rounded-2xl transition-all"><Edit2 size={18} /></button>
-                </div>
-                <div className="space-y-4 mb-8">
-                  <div className="flex items-center text-sm font-bold text-slate-600 italic"><User className="mr-3 text-purple-600" size={16} />{primary?.name || 'N/A'}</div>
-                  <div className="flex items-center text-sm font-bold text-slate-600 italic"><Mail className="mr-3 text-purple-600" size={16} /><span className="truncate">{primary?.email || 'N/A'}</span></div>
-                  <div className="flex items-center text-sm font-bold text-slate-600 italic"><Building className="mr-3 text-purple-600" size={16} />{customer.addresses.length} ACTIVE NODES</div>
-                </div>
-                <div className="pt-6 border-t border-slate-50 flex justify-between items-center">
-                  <span className={`inline-flex items-center px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest italic ${customer.tier === 'VIP' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-500'}`}>
-                    {customer.tier === 'VIP' && <Star size={12} className="mr-2 fill-current" />} {customer.tier} Account
-                  </span>
-                  <button onClick={() => handleOpenModal(customer)} className="text-[10px] font-black text-purple-600 uppercase tracking-widest hover:translate-x-1 transition-transform italic">Profile &rarr;</button>
-                </div>
+      <Card className="p-0 border-white/20 flex-1 flex flex-col overflow-hidden shadow-2xl">
+        <div className="overflow-auto h-full custom-scrollbar">
+          <table className="w-full text-left font-bold border-collapse">
+            <thead className="sticky top-0 bg-white/95 backdrop-blur-md z-10 border-b border-black/[0.03]">
+              <tr className="text-[10px] text-slate-400 uppercase tracking-[0.4em] italic">
+                <th className="px-10 py-8 w-12"><button onClick={() => setSelectedIds(selectedIds.length === filteredCustomers.length ? [] : filteredCustomers.map(c => c.id))}>{selectedIds.length === filteredCustomers.length ? <CheckSquare size={18} className="text-blue-600"/> : <Square size={18}/>}</button></th>
+                <th className="px-10 py-8">Identity Profile</th>
+                <th className="px-10 py-8">Registry UID</th>
+                <th className="px-10 py-8">Tier Architecture</th>
+                <th className="px-10 py-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/[0.02]">
+              {filteredCustomers.map(c => (
+                <tr key={c.id} className={`hover:bg-blue-50/20 transition-all cursor-pointer group ${selectedIds.includes(c.id) ? 'bg-blue-50/40' : ''}`} onClick={() => handleOpenDrawer(c)}>
+                  <td className="px-10 py-10" onClick={e => { e.stopPropagation(); handleToggleSelect(c.id); }}>
+                    {selectedIds.includes(c.id) ? <CheckSquare size={18} className="text-blue-600"/> : <Square size={18} className="text-slate-200 group-hover:text-slate-300"/>}
+                  </td>
+                  <td className="px-10 py-10"><p className="text-base font-black text-slate-800 tracking-tighter uppercase italic leading-none">{c.companyName}</p><p className="text-[10px] text-slate-400 mt-2 font-medium italic">Nodes: {c.contacts.length} Personnel • {c.addresses.length} Facilities</p></td>
+                  <td className="px-10 py-10 text-[11px] font-mono font-bold text-slate-400 uppercase tracking-widest">{c.id}</td>
+                  <td className="px-10 py-10"><Badge color={c.tier === 'VIP' ? 'amber' : 'slate'} className="px-8 py-1.5 shadow-sm">{c.tier}</Badge></td>
+                  <td className="px-10 py-10 text-right"><button className="p-3 text-slate-300 group-hover:text-blue-600 transition-all hover:bg-white rounded-2xl shadow-sm"><ChevronRight size={26}/></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {isDrawerOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="w-full max-w-4xl bg-white h-auto max-h-[90vh] rounded-[3.5rem] shadow-2xl flex flex-col italic font-bold overflow-hidden border border-slate-100 animate-slide-up">
+              <header className="px-12 py-10 bg-slate-900 text-white flex justify-between items-center shrink-0 border-b-[12px] border-blue-600">
+                 <div><h3 className="text-2xl font-black italic tracking-tighter uppercase leading-none">Identity Specification</h3><p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em] mt-2 italic">Registry Node: {formData.id}</p></div>
+                 <button onClick={() => setIsDrawerOpen(false)} className="p-4 hover:bg-white/10 rounded-full transition-all active:scale-90 shadow-lg"><X size={32}/></button>
+              </header>
+              <div className="flex bg-slate-100 p-1.5 rounded-[2.5rem] mx-12 mt-10 gap-1 shrink-0 shadow-inner">
+                {['DETAILS', 'CONTACTS', 'ADDRESSES', 'HISTORY'].map(tab => (
+                  <button key={tab} onClick={() => setDrawerTab(tab as any)} className={`flex-1 p-4 rounded-[2rem] text-[10px] font-black uppercase transition-all ${drawerTab === tab ? 'bg-white text-blue-600 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}>{tab}</button>
+                ))}
               </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/95 backdrop-blur-xl p-4 animate-fade-in">
-          <div className="bg-white rounded-[4rem] shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border-t-[16px] border-purple-600">
-            <div className="bg-slate-50 px-10 py-8 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter">{editingId ? 'Edit Profile' : 'Register New Account'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="p-4 bg-white rounded-2xl border-2 border-slate-100 text-slate-300 hover:text-slate-900 transition-all"><X size={24} /></button>
-            </div>
-            <div className="flex bg-slate-50/50 p-2 border-b border-slate-100 shrink-0">
-              <button onClick={() => setActiveTab('DETAILS')} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all ${activeTab === 'DETAILS' ? 'bg-white text-purple-600 shadow-sm italic' : 'text-slate-400'}`}>General</button>
-              <button onClick={() => setActiveTab('CONTACTS')} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all ${activeTab === 'CONTACTS' ? 'bg-white text-purple-600 shadow-sm italic' : 'text-slate-400'}`}>Contacts ({formData.contacts.length})</button>
-              <button onClick={() => setActiveTab('ADDRESSES')} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all ${activeTab === 'ADDRESSES' ? 'bg-white text-purple-600 shadow-sm italic' : 'text-slate-400'}`}>Addresses ({formData.addresses.length})</button>
-            </div>
-            <div className="p-10 overflow-y-auto custom-scrollbar flex-1">
-              {activeTab === 'DETAILS' && (
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-3 tracking-widest italic">Entity Name</label>
-                    <input type="text" className="w-full p-4 border-2 border-slate-100 bg-slate-50/50 rounded-2xl outline-none focus:border-purple-400 text-sm font-black italic uppercase shadow-inner" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} />
+              <main className="flex-1 p-12 overflow-y-auto custom-scrollbar">
+                {drawerTab === 'DETAILS' && (
+                  <div className="space-y-8 animate-fade-in">
+                    <div className="space-y-2"><label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Legal Registered Entity Name</label><input className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-3xl text-2xl font-black italic uppercase outline-none focus:ring-8 focus:ring-blue-50 transition-all shadow-inner" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} placeholder="NODE_NAME_TBD" /></div>
+                    <div className="grid grid-cols-2 gap-8"><div className="space-y-2"><label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Tier Logic</label><select className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black italic shadow-sm" value={formData.tier} onChange={e => setFormData({...formData, tier: e.target.value as any})}><option value="Regular">STANDARD_CHANNEL</option><option value="VIP">VIP_PRIORITY_NODE</option></select></div><div className="space-y-2"><label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Metadata Signals</label><input className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black italic shadow-sm" value={formData.notes || ''} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="Analytics Kernel..." /></div></div>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-3 tracking-widest italic">Tier</label>
-                    <select className="w-full p-4 border-2 border-slate-100 bg-slate-50/50 rounded-2xl outline-none focus:border-purple-400 text-sm font-black uppercase shadow-inner" value={formData.tier} onChange={e => setFormData({...formData, tier: e.target.value as any})}>
-                      <option value="Regular">Regular</option>
-                      <option value="VIP">VIP Platinum</option>
-                    </select>
+                )}
+                {drawerTab === 'CONTACTS' && (
+                  <div className="space-y-6 animate-fade-in">
+                    <Button variant="outline" className="w-full py-8 border-dashed border-3 rounded-[2.5rem] font-black italic shadow-sm" onClick={() => setFormData({...formData, contacts: [...formData.contacts, {id: Date.now().toString(), name: '', email: '', phone: '', role: 'Admin'}]})}>+ Append Personnel Node</Button>
+                    {formData.contacts.map((c, idx) => (
+                      <div key={c.id} className="p-8 bg-slate-50 border-2 border-slate-100 rounded-[3rem] space-y-4 relative shadow-sm group">
+                        <button onClick={() => setFormData({...formData, contacts: formData.contacts.filter(x => x.id !== c.id)})} className="absolute top-6 right-6 text-slate-300 hover:text-rose-500 transition-all"><Trash2 size={22}/></button>
+                        <div className="grid grid-cols-2 gap-6">
+                           <input placeholder="Full Name Node..." className="p-5 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={c.name} onChange={e => { const cs = [...formData.contacts]; cs[idx].name = e.target.value; setFormData({...formData, contacts: cs}); }} />
+                           <input placeholder="Signal (Email)..." className="p-5 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={c.email} onChange={e => { const cs = [...formData.contacts]; cs[idx].email = e.target.value; setFormData({...formData, contacts: cs}); }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-3 tracking-widest italic">Internal Notes</label>
-                    <textarea className="w-full p-5 border-2 border-slate-100 bg-slate-50/50 rounded-3xl outline-none h-32 text-sm font-bold italic shadow-inner resize-none" value={formData.notes || ''} onChange={e => setFormData({...formData, notes: e.target.value})} />
+                )}
+                {drawerTab === 'ADDRESSES' && (
+                  <div className="space-y-6 animate-fade-in">
+                    <Button variant="outline" className="w-full py-8 border-dashed border-3 rounded-[2.5rem] font-black italic shadow-sm" onClick={() => setFormData({...formData, addresses: [...formData.addresses, {id: Date.now().toString(), label: 'HQ', street: '', city: '', country: '', building: '', poBox: ''}]})}>+ Append Logistics Node</Button>
+                    {formData.addresses.map((a, idx) => (
+                      <div key={a.id} className="p-8 bg-slate-50 border-2 border-slate-100 rounded-[3rem] space-y-4 relative shadow-sm group">
+                        <button onClick={() => setFormData({...formData, addresses: formData.addresses.filter(x => x.id !== a.id)})} className="absolute top-6 right-6 text-slate-300 hover:text-rose-500 transition-all"><Trash2 size={22}/></button>
+                        <div className="grid grid-cols-2 gap-6">
+                           <input placeholder="Building / Suite..." className="p-5 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={a.building} onChange={e => { const as = [...formData.addresses]; as[idx].building = e.target.value; setFormData({...formData, addresses: as}); }} />
+                           <input placeholder="Street Path..." className="p-5 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={a.street} onChange={e => { const as = [...formData.addresses]; as[idx].street = e.target.value; setFormData({...formData, addresses: as}); }} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-6">
+                           <input placeholder="City Hub..." className="p-4 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={a.city} onChange={e => { const as = [...formData.addresses]; as[idx].city = e.target.value; setFormData({...formData, addresses: as}); }} />
+                           <input placeholder="Country..." className="p-4 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={a.country} onChange={e => { const as = [...formData.addresses]; as[idx].country = e.target.value; setFormData({...formData, addresses: as}); }} />
+                           <input placeholder="P.O. Box..." className="p-4 rounded-2xl border-2 border-white italic font-bold shadow-sm" value={a.poBox} onChange={e => { const as = [...formData.addresses]; as[idx].poBox = e.target.value; setFormData({...formData, addresses: as}); }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              )}
-              {activeTab === 'CONTACTS' && (
-                <div className="space-y-6">
-                  {formData.contacts.map((contact, idx) => (
-                    <div key={idx} className="bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 relative group animate-fade-in">
-                      <button onClick={() => setFormData({...formData, contacts: formData.contacts.filter((_, i) => i !== idx)})} className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 transition-colors"><Trash2 size={16}/></button>
-                      <div className="grid grid-cols-2 gap-5 mb-4">
-                        <input placeholder="Full Name" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={contact.name} onChange={e => updateContact(idx, 'name', e.target.value)} />
-                        <input placeholder="Job Title" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={contact.role} onChange={e => updateContact(idx, 'role', e.target.value)} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-5">
-                        <input placeholder="Email" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black" value={contact.email} onChange={e => updateContact(idx, 'email', e.target.value)} />
-                        <input placeholder="Phone" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black" value={contact.phone} onChange={e => updateContact(idx, 'phone', e.target.value)} />
-                      </div>
-                    </div>
-                  ))}
-                  <button onClick={addContact} className="w-full py-4 border-2 border-dashed border-slate-300 rounded-[2rem] text-slate-400 hover:border-purple-400 hover:text-purple-600 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 italic transition-all">
-                    <Plus size={16}/> Add Contact
-                  </button>
-                </div>
-              )}
-              {activeTab === 'ADDRESSES' && (
-                <div className="space-y-6">
-                  {formData.addresses.map((addr, idx) => (
-                    <div key={idx} className="bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 relative">
-                      <button onClick={() => setFormData({...formData, addresses: formData.addresses.filter((_, i) => i !== idx)})} className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-600 transition-colors"><Trash2 size={16}/></button>
-                      <div className="grid grid-cols-2 gap-5 mb-4">
-                        <input placeholder="Label (e.g. HQ)" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={addr.label} onChange={e => updateAddress(idx, 'label', e.target.value)} />
-                        <select className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={addr.type} onChange={e => updateAddress(idx, 'type', e.target.value as any)}>
-                          <option value="Both">Billing & Shipping</option>
-                          <option value="Billing">Billing Only</option>
-                          <option value="Shipping">Shipping Only</option>
-                        </select>
-                      </div>
-                      <input placeholder="Street Address" className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase mb-4" value={addr.street} onChange={e => updateAddress(idx, 'street', e.target.value)} />
-                      <div className="grid grid-cols-3 gap-4">
-                        <input placeholder="City" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={addr.city} onChange={e => updateAddress(idx, 'city', e.target.value)} />
-                        <input placeholder="Country" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={addr.country} onChange={e => updateAddress(idx, 'country', e.target.value)} />
-                        <input placeholder="Zip" className="p-3 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase" value={addr.zip} onChange={e => updateAddress(idx, 'zip', e.target.value)} />
-                      </div>
-                    </div>
-                  ))}
-                  <button onClick={addAddress} className="w-full py-4 border-2 border-dashed border-slate-300 rounded-[2rem] text-slate-400 hover:border-purple-400 hover:text-purple-600 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 italic transition-all">
-                    <Plus size={16}/> Add Branch Location
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="bg-slate-50 px-10 py-8 border-t border-slate-100 flex justify-end gap-5 shrink-0">
-              <button onClick={() => setIsModalOpen(false)} className="px-8 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest hover:bg-slate-200 rounded-2xl transition-all italic">Cancel</button>
-              <button onClick={handleSave} className="px-12 py-4 bg-purple-600 text-white text-[11px] font-black uppercase tracking-widest rounded-2xl hover:bg-purple-700 transition-all shadow-xl shadow-purple-500/30 italic flex items-center gap-3 active:scale-95">
-                <Save size={18} /> {editingId ? 'Update Record' : 'Save New Account'}
-              </button>
-            </div>
-          </div>
+                )}
+              </main>
+              <footer className="px-12 py-10 border-t border-slate-100 flex justify-end gap-5 bg-white shrink-0 shadow-inner">
+                 <Button variant="ghost" className="px-10 rounded-2xl font-black uppercase text-xs shadow-sm border border-slate-100" onClick={() => setIsDrawerOpen(false)}>Abort Modification</Button>
+                 <Button className="px-20 py-5 rounded-2xl shadow-2xl font-black italic uppercase tracking-widest shadow-blue-500/30 active:scale-95 transition-all" onClick={handleSaveEntity}><Save size={22} className="mr-3"/> Commit Node Sync</Button>
+              </footer>
+           </div>
         </div>
       )}
     </div>

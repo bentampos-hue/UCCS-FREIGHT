@@ -1,420 +1,334 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Send, Globe, Anchor, Plus, Check, CheckCircle, ExternalLink, X, Mail, Eye, ArrowRight, Trophy, BarChart3, ChevronDown, Calendar, Package, Copy, Link as LinkIcon, Inbox, Edit3, MessageSquareText, Users, Zap, Plane, Ship, AlertTriangle, TrendingUp, BellRing, Loader2, Calculator, Save, FlaskConical, Trash2, MapPin, PackagePlus, ChevronRight } from 'lucide-react';
-import { Vendor, VendorEnquiry, VendorBid, EnquiryStatus, Currency, SharedProps, QuoteRequest, Modality, PackagingType, PackagingLine } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  MapPin, Box, Info, AlertCircle, Save, Send, Globe, 
+  Anchor, CheckCircle, ChevronRight, Plane, Ship, Trash2, 
+  Plus, Users, Search, ClipboardList
+} from 'lucide-react';
+import { Job, CargoLine, SharedProps, Customer, Vendor, JobStatus, IntakeData, AppView } from '../types';
+import { calculateCargoMetrics, calculateJobCompleteness } from '../utils/logistics';
+import { intakeSchema } from '../validation/schemas';
 import { repo } from '../services/repository';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
+import { Card } from './ui/Card';
 
-interface VendorEnquiryProps extends SharedProps {
-  vendors: Vendor[];
-  enquiries: VendorEnquiry[];
-  onAddEnquiry: (enquiry: VendorEnquiry) => void;
-  onUpdateEnquiry: (enquiry: VendorEnquiry) => void;
-  onAwardEnquiry: (enquiryId: string, bid: VendorBid, sellPrice: number) => void;
-  onLoadToSimulator: (data: QuoteRequest) => void;
-}
+// Fixed: Added missing tempControl and handlingNotes properties to satisfy IntakeData interface requirements
+const createEmptyIntake = (): IntakeData => ({
+  modality: 'SEA',
+  origin: '', destination: '', pickupAddress: '', deliveryAddress: '',
+  incoterms: 'FOB', readyDate: '', commodity: '', cargoLines: [],
+  cargoValue: 0, currency: 'USD', isDG: false, transitPriority: 'Standard',
+  shipperId: '', consigneeId: '', insuranceRequested: false,
+  customsClearance: false,
+  lastMileDelivery: false,
+  packingRequired: false,
+  tempControl: false,
+  handlingNotes: ''
+});
 
-const WorkflowBreadcrumb: React.FC<{ activeStep: number }> = ({ activeStep }) => (
-  <div className="flex items-center gap-4 px-10 mb-8 animate-fade-in">
-    <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>1</span>
-      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 1 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Market Intake</span>
-    </div>
-    <ChevronRight size={14} className="text-slate-300" />
-    <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 2 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>2</span>
-      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 2 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Quote Generation</span>
-    </div>
-    <ChevronRight size={14} className="text-slate-300" />
-    <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${activeStep === 3 ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}>3</span>
-      <span className={`text-[10px] font-black uppercase tracking-widest italic ${activeStep === 3 ? 'text-blue-600 underline decoration-blue-500 underline-offset-4' : 'text-slate-400'}`}>Job Execution</span>
-    </div>
-  </div>
-);
-
-const getStatusBadge = (status: EnquiryStatus) => {
-  const styles: Record<EnquiryStatus, string> = {
-    DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
-    SENT: 'bg-blue-100 text-blue-600 border-blue-200',
-    VIEWED: 'bg-indigo-100 text-indigo-600 border-indigo-200',
-    BID_RECEIVED: 'bg-emerald-100 text-emerald-600 border-emerald-200 shadow-sm shadow-emerald-100 animate-pulse',
-    AWARDED: 'bg-purple-100 text-purple-600 border-purple-200',
-    CLOSED: 'bg-slate-200 text-slate-500 border-slate-300',
-  };
-  return <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${styles[status]}`}>{status.replace(/_/g, ' ')}</span>;
-};
-
-const VendorEnquiryComponent: React.FC<VendorEnquiryProps> = ({ 
-  vendors, enquiries, onAddEnquiry, onUpdateEnquiry, onAwardEnquiry, onLoadToSimulator, settings, onNotify, currentUser, onLogActivity 
+const VendorEnquiry: React.FC<SharedProps & { vendors: Vendor[]; customers: Customer[] }> = ({ 
+  currentUser, onNotify, vendors, customers, settings, onNavigate 
 }) => {
-  const [activeTab, setActiveTab] = useState<'NEW' | 'DASHBOARD'>('DASHBOARD');
-  const [expandedEnquiryId, setExpandedEnquiryId] = useState<string | null>(enquiries[0]?.id || null);
-  const [modality, setModality] = useState<Modality>('SEA');
+  const [activeTab, setActiveTab] = useState<'LIST' | 'EDITOR'>('LIST');
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [currentJob, setCurrentJob] = useState<Job | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const intelligence = useMemo(() => ({
-    activeEnquiries: enquiries.filter(e => e.status !== 'CLOSED' && e.status !== 'AWARDED').length
-  }), [enquiries]);
-
-  const toggleExpand = (id: string) => {
-    setExpandedEnquiryId(expandedEnquiryId === id ? null : id);
-  };
-
-  const [originPort, setOriginPort] = useState('');
-  const [destPort, setDestPort] = useState('');
-  const [pickupZip, setPickupZip] = useState('');
-  const [deliveryZip, setDeliveryZip] = useState('');
-  const [readyDate, setReadyDate] = useState('');
-  const [incoterms, setIncoterms] = useState('FOB');
-  const [targetRate, setTargetRate] = useState<number>(0);
-  const [currency, setCurrency] = useState<Currency>(settings.defaultCurrency);
-  const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
-  const [runSimulation, setRunSimulation] = useState(true);
-
-  const [cargoLines, setCargoLines] = useState<PackagingLine[]>([
-    { id: '1', type: 'PALLET', quantity: 1, length: 120, width: 80, height: 100, weightPerUnit: 450, description: 'General Cargo' }
-  ]);
-
-  const addCargoLine = () => {
-    setCargoLines([...cargoLines, { id: Date.now().toString(), type: 'PALLET', quantity: 1, length: 120, width: 80, height: 100, weightPerUnit: 0, description: '' }]);
-  };
-
-  const removeCargoLine = (id: string) => {
-    if (cargoLines.length > 1) setCargoLines(cargoLines.filter(l => l.id !== id));
-  };
-
-  const updateCargoLine = (id: string, field: keyof PackagingLine, value: any) => {
-    setCargoLines(cargoLines.map(l => l.id === id ? { ...l, [field]: value } : l));
-  };
-
-  const totalSpecs = useMemo(() => {
-    const qty = cargoLines.reduce((s, l) => s + l.quantity, 0);
-    const weight = cargoLines.reduce((s, l) => s + (l.weightPerUnit * l.quantity), 0);
-    const volume = cargoLines.reduce((s, l) => s + ((l.length * l.width * l.height) / 1000000 * l.quantity), 0);
-    return { qty, weight, volume };
-  }, [cargoLines]);
-
-  const formattedBroadcast = useMemo(() => {
-    const cargoTable = cargoLines.map(l => `• ${l.quantity}x ${l.type} (${l.length}x${l.width}x${l.height}cm) | ${l.weightPerUnit}kg ea | ${l.description}`).join('\n');
-    const typeLabel = modality === 'AIR' ? 'AirFreight' : 'SeaFreight';
-    return `SPOT ENQUIRY: ${originPort} to ${destPort} | REF: SPOT-${Date.now().toString().slice(-4)}
-
-Dear Partner,
-
-Please provide a spot rate for the following ${typeLabel} requirement:
-
-[ ROUTING ]
-POL: ${originPort || 'TBD'}
-POD: ${destPort || 'TBD'}
-PICKUP: ${pickupZip || 'TBD'}
-DELIVERY: ${deliveryZip || 'TBD'}
-INCOTERMS: ${incoterms}
-READY DATE: ${readyDate || 'ASAP'}
-
-[ CARGO ]
-${cargoTable}
-TOTAL WEIGHT: ${totalSpecs.weight.toFixed(2)} KG
-TOTAL VOLUME: ${totalSpecs.volume.toFixed(2)} CBM
-
-PORTAL ACCESS:
-https://uccs.app/bid/{{PORTAL_TOKEN}}
-
-Regards,
-Unique CCS Procurement`;
-  }, [originPort, destPort, pickupZip, deliveryZip, incoterms, readyDate, cargoLines, totalSpecs, modality]);
-
-  const handleCreateEnquiry = (toMailto: boolean = false) => {
-     if (!originPort || !destPort || selectedVendorIds.length === 0) {
-         onNotify('warning', 'Routing and at least one Vendor are required.');
-         return;
-     }
-     const portalToken = Math.random().toString(36).substr(2, 12);
-     const newRef = `SPOT-${modality.charAt(0)}-${originPort.substring(0,3).toUpperCase()}-${Math.floor(1000 + Math.random()*9000)}`;
-     const newEnquiry: VendorEnquiry = {
-         id: `E${String(enquiries.length + 1).padStart(3, '0')}`,
-         portalToken,
-         modality,
-         reference: newRef,
-         origin: originPort,
-         destination: destPort,
-         pickupZip,
-         deliveryZip,
-         incoterms,
-         readyDate,
-         commodity: cargoLines.map(l => l.description).join(', '),
-         cargoLines,
-         currency,
-         targetRate: targetRate > 0 ? targetRate : undefined,
-         status: 'SENT',
-         sentDate: new Date().toISOString().split('T')[0],
-         vendorsSentTo: selectedVendorIds,
-         bids: []
-     };
-     onAddEnquiry(newEnquiry);
-     setActiveTab('DASHBOARD');
-
-     if (toMailto) {
-        const vendorEmails = vendors
-            .filter(v => selectedVendorIds.includes(v.id))
-            .map(v => v.contacts.find(c => c.isPrimary)?.email)
-            .filter(Boolean)
-            .join(',');
-
-        const subject = `SPOT ENQUIRY: ${originPort} -> ${destPort} | REF: ${newRef}`;
-        const body = formattedBroadcast.replace('{{PORTAL_TOKEN}}', portalToken);
-        
-        window.location.href = `mailto:${vendorEmails}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-     }
-
-     if (runSimulation) {
-        onNotify('info', 'Simulation: Ghost Bidder active. Rate sync in 5s.');
-        setTimeout(async () => {
-           const bidVendor = vendors.find(v => selectedVendorIds.includes(v.id)) || vendors[0];
-           const ghostBid: VendorBid = {
-              vendorId: bidVendor.id,
-              vendorName: bidVendor.name,
-              amount: targetRate ? Math.round(targetRate * 0.95) : 1200,
-              currency: currency,
-              transitTime: modality === 'SEA' ? 28 : 2,
-              validityDate: new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
-              receivedAt: new Date().toISOString(),
-           };
-           const latestEnquiry = (await repo.getEnquiries()).find(e => e.portalToken === portalToken);
-           if (latestEnquiry) {
-              latestEnquiry.bids.push(ghostBid);
-              latestEnquiry.status = 'BID_RECEIVED';
-              await repo.saveItem('enquiries', latestEnquiry, currentUser);
-              onNotify('success', `Partner Signal: Rate received from ${bidVendor.name}!`);
-              onUpdateEnquiry(latestEnquiry);
-           }
-        }, 5000);
-     }
-     onNotify('success', "Intake campaign recorded in platform ledger.");
-  };
-
-  const simulateToQuoteEngine = (enquiry: VendorEnquiry, bid: VendorBid) => {
-    onLoadToSimulator({
-        modality: enquiry.modality,
-        origin: enquiry.origin,
-        destination: enquiry.destination,
-        originAddress: enquiry.pickupZip ? `Pick up Zip: ${enquiry.pickupZip}` : '',
-        destinationAddress: enquiry.deliveryZip ? `Delivery Zip: ${enquiry.deliveryZip}` : '',
-        cargoType: enquiry.commodity,
-        cargoLines: enquiry.cargoLines,
-        weight: totalSpecs.weight,
-        volume: totalSpecs.volume,
-        etd: enquiry.readyDate,
-        transitTime: bid.transitTime,
-        buyRate: bid.amount,
-        margin: Math.round(bid.amount * 0.15),
-        currency: bid.currency,
-        customerEmail: '',
-        lineItems: [{ description: 'Freight Cost Node', amount: bid.amount, quantity: 1 }],
-        sourceRef: enquiry.reference,
-        sourceVendor: bid.vendorName,
-        sourceVendorId: bid.vendorId,
-        sourceEnquiryId: enquiry.id
+  useEffect(() => {
+    repo.getJobs().then(list => {
+      setJobs(list);
+      setIsLoading(false);
     });
-    onNotify('success', 'Contextual data exported to Quote terminal.');
+  }, []);
+
+  const metrics = useMemo(() => {
+    if (!currentJob) return { totalActualWeight: 0, totalVolumeCbm: 0, chargeableUnits: 0 };
+    return calculateCargoMetrics(currentJob.intakeData.cargoLines, currentJob.intakeData.modality);
+  }, [currentJob?.intakeData.cargoLines, currentJob?.intakeData.modality]);
+
+  const handleCreateNew = () => {
+    // Fixed: Removed missing property 'vendorSLAs' and ensured compliance with Job interface
+    const newJob: Job = {
+      id: `JOB-${Date.now()}`,
+      reference: `REF-${Date.now()}`,
+      status: 'DRAFT',
+      intakeData: createEmptyIntake(),
+      completenessScore: 0,
+      vendorBids: [],
+      quoteVersions: [],
+      invitedVendorIds: [],
+      messages: [],
+      ownerId: currentUser.id,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    setCurrentJob(newJob);
+    setActiveTab('EDITOR');
   };
+
+  const handleSaveDraft = async () => {
+    if (!currentJob) return;
+    const score = calculateJobCompleteness(currentJob.intakeData);
+    const updatedJob = { ...currentJob, completenessScore: score };
+    await repo.saveJob(updatedJob, currentUser);
+    setJobs(prev => {
+        const idx = prev.findIndex(j => j.id === updatedJob.id);
+        if (idx > -1) {
+            const copy = [...prev];
+            copy[idx] = updatedJob;
+            return copy;
+        }
+        return [updatedJob, ...prev];
+    });
+    onNotify('success', 'Market Intake draft synchronized.');
+  };
+
+  const handleSubmitIntake = async () => {
+    if (!currentJob) return;
+    const result = intakeSchema.safeParse(currentJob.intakeData);
+    if (!result.success) {
+      onNotify('error', result.error.errors[0].message);
+      return;
+    }
+    
+    const updatedJob = { ...currentJob, status: 'INTAKE' as JobStatus, completenessScore: 100 };
+    await repo.saveJob(updatedJob, currentUser);
+    onNotify('success', 'Intake finalized. Moving to Quoting Engine.');
+    // Fix: SIMULATOR doesn't exist, using PROJECT_CENTER
+    onNavigate(AppView.PROJECT_CENTER, { jobId: updatedJob.id });
+  };
+
+  if (activeTab === 'LIST') {
+    return (
+      <div className="max-w-6xl mx-auto animate-fade-in space-y-6">
+        <header className="flex justify-between items-end">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Job Registry</h2>
+            <p className="text-slate-500 text-sm">Manage end-to-end logistics lifecycle records.</p>
+          </div>
+          <Button onClick={handleCreateNew}><Plus size={18}/> New Opportunity</Button>
+        </header>
+
+        <Card className="p-0">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest border-b border-slate-100">
+              <tr>
+                <th className="px-6 py-4">Job ID</th>
+                <th className="px-6 py-4">Modality</th>
+                <th className="px-6 py-4">Route</th>
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4">Score</th>
+                <th className="px-6 py-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {jobs.length === 0 ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">No active jobs found in the platform.</td></tr>
+              ) : jobs.map(job => (
+                <tr key={job.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">{job.id}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      {job.intakeData.modality === 'SEA' ? <Ship size={14} className="text-blue-500"/> : <Plane size={14} className="text-indigo-500"/>}
+                      <span className="text-xs font-bold text-slate-600">{job.intakeData.modality}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                      {job.intakeData.origin || 'TBD'} <ChevronRight size={12}/> {job.intakeData.destination || 'TBD'}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4"><Badge color={job.status === 'DRAFT' ? 'slate' : 'blue'}>{job.status}</Badge></td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-12 bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-blue-600 h-full" style={{width: `${job.completenessScore}%`}} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400">{job.completenessScore}%</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <Button variant="ghost" onClick={() => { setCurrentJob(job); setActiveTab('EDITOR'); }}>Manage</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in relative pb-20 italic">
-        <WorkflowBreadcrumb activeStep={1} />
+    <div className="max-w-6xl mx-auto space-y-8 animate-fade-in pb-20">
+      <header className="flex justify-between items-end border-b border-slate-200 pb-6">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <Badge color="blue">{currentJob?.status}</Badge>
+            <span className="text-slate-400 text-xs font-mono">{currentJob?.id}</span>
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800">Market Intake & Intake Data</h2>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={() => setActiveTab('LIST')}>Back to Registry</Button>
+          <Button variant="secondary" onClick={handleSaveDraft}>Save Draft</Button>
+          <Button onClick={handleSubmitIntake} disabled={currentJob!.completenessScore < 80}>Submit for Quoting</Button>
+        </div>
+      </header>
 
-        <div className="bg-slate-900 text-white p-12 rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-10 relative overflow-hidden border-b-[16px] border-blue-600">
-            <div className="absolute top-0 right-0 p-20 opacity-5 pointer-events-none transform rotate-12"><Globe size={280} /></div>
-            <div className="z-10">
-                <div className="flex items-center gap-3 mb-5">
-                    <span className="bg-blue-600 px-4 py-1.5 rounded-full text-[11px] font-black uppercase tracking-widest shadow-lg italic">Market intake v5</span>
-                    <label className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-4 py-1.5 rounded-full cursor-pointer hover:bg-slate-700 transition-colors">
-                        <FlaskConical size={14} className={runSimulation ? 'text-blue-400' : 'text-slate-500'} />
-                        <span className="text-[10px] font-black uppercase tracking-widest italic">{runSimulation ? 'Sim Active' : 'Sim Off'}</span>
-                        <input type="checkbox" checked={runSimulation} onChange={e => setRunSimulation(e.target.checked)} className="hidden" />
-                    </label>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-8">
+          {/* Section 1: Routing */}
+          <Card title="01 Routing DNA">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Port of Loading (POL)</label>
+                <input 
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm" 
+                  value={currentJob?.intakeData.origin}
+                  onChange={e => setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, origin: e.target.value}})}
+                  placeholder="e.g. SHANGHAI"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Port of Discharge (POD)</label>
+                <input 
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm" 
+                  value={currentJob?.intakeData.destination}
+                  onChange={e => setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, destination: e.target.value}})}
+                  placeholder="e.g. ROTTERDAM"
+                />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Pickup Facility Address</label>
+                <textarea 
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm h-20 resize-none" 
+                  value={currentJob?.intakeData.pickupAddress}
+                  onChange={e => setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, pickupAddress: e.target.value}})}
+                  placeholder="Full door address..."
+                />
+              </div>
+            </div>
+          </Card>
+
+          {/* Section 2: Involved Entities */}
+          <Card title="02 Involved Entities">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Shipper / Exporter</label>
+                <select 
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm"
+                  value={currentJob?.intakeData.shipperId}
+                  onChange={e => setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, shipperId: e.target.value}})}
+                >
+                  <option value="">Select Account</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Consignee / Importer</label>
+                <select 
+                  className="w-full p-2 border border-slate-200 rounded-lg text-sm"
+                  value={currentJob?.intakeData.consigneeId}
+                  onChange={e => setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, consigneeId: e.target.value}})}
+                >
+                  <option value="">Select Account</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {/* Section 3: Cargo Details */}
+          <Card title="03 Physical Payload">
+            <div className="space-y-4">
+              {currentJob?.intakeData.cargoLines.map((line, idx) => (
+                <div key={line.id} className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100 group">
+                  <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-400 text-xs">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 grid grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Qty / Type</p>
+                      <p className="text-xs font-bold text-slate-700">{line.qty}x {line.type}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Dims (cm)</p>
+                      <p className="text-xs font-bold text-slate-700">{line.length}x{line.width}x{line.height}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Weight ea.</p>
+                      <p className="text-xs font-bold text-slate-700">{line.weight} KG</p>
+                    </div>
+                    <div className="text-right">
+                       <Button variant="danger" className="opacity-0 group-hover:opacity-100 p-2" onClick={() => {
+                         const copy = [...currentJob!.intakeData.cargoLines];
+                         copy.splice(idx, 1);
+                         setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, cargoLines: copy}});
+                       }}><Trash2 size={14}/></Button>
+                    </div>
+                  </div>
                 </div>
-                <h3 className="text-5xl font-black tracking-tighter mb-4 italic uppercase">PROCUREMENT HUB</h3>
-                <p className="text-slate-400 text-sm font-bold uppercase tracking-[0.3em] max-w-lg leading-relaxed">Broadcast unique portal links to preferred carriers instantly.</p>
+              ))}
+              <Button variant="outline" className="w-full border-dashed py-6" onClick={() => {
+                // Fixed: Added missing property isStackable to satisfy CargoLine interface
+                const newLine: CargoLine = { id: `C-${Date.now()}`, type: 'PALLET', qty: 1, length: 120, width: 80, height: 100, weight: 500, description: 'General Cargo', isStackable: true };
+                setCurrentJob({...currentJob!, intakeData: {...currentJob!.intakeData, cargoLines: [...currentJob!.intakeData.cargoLines, newLine]}});
+              }}>+ Add Payload Node</Button>
             </div>
-            <div className="flex bg-slate-800 p-2 rounded-3xl z-10 shadow-2xl border border-slate-700">
-                <button onClick={() => setModality('SEA')} className={`flex items-center space-x-4 px-10 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all ${modality === 'SEA' ? 'bg-blue-600 text-white shadow-xl italic' : 'text-slate-500 hover:text-white'}`}>
-                    <Ship size={20} /> <span>SEA</span>
-                </button>
-                <button onClick={() => setModality('AIR')} className={`flex items-center space-x-4 px-10 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all ${modality === 'AIR' ? 'bg-indigo-600 text-white shadow-xl italic' : 'text-slate-500 hover:text-white'}`}>
-                    <Plane size={20} /> <span>AIR</span>
-                </button>
-            </div>
+          </Card>
         </div>
 
-        <div className="flex space-x-4">
-            <button onClick={() => setActiveTab('NEW')} className={`px-12 py-5 rounded-[2rem] text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'NEW' ? 'bg-slate-900 text-white shadow-xl scale-105 italic' : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-400'}`}>Create Market Enq.</button>
-            <button onClick={() => setActiveTab('DASHBOARD')} className={`px-12 py-5 rounded-[2rem] text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'DASHBOARD' ? 'bg-slate-900 text-white shadow-xl scale-105 italic' : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-400'}`}>Live Campaigns ({intelligence.activeEnquiries})</button>
-        </div>
-
-        {activeTab === 'NEW' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-fade-in">
-                <div className="lg:col-span-8 space-y-8">
-                    <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-                        <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] mb-10 border-b border-slate-50 pb-6 flex items-center italic">
-                            <MapPin size={20} className="mr-4 text-blue-600" /> [01] Routing DNA
-                        </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="space-y-6">
-                                <input type="text" value={originPort} onChange={e => setOriginPort(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl focus:border-blue-500 outline-none text-sm font-black uppercase italic shadow-inner" placeholder="POL CODE" />
-                                <input type="text" value={pickupZip} onChange={e => setPickupZip(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl focus:border-blue-500 outline-none text-sm font-black uppercase italic shadow-inner" placeholder="PICKUP ZIP" />
-                            </div>
-                            <div className="space-y-6">
-                                <input type="text" value={destPort} onChange={e => setDestPort(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl focus:border-blue-500 outline-none text-sm font-black uppercase italic shadow-inner" placeholder="POD CODE" />
-                                <input type="text" value={deliveryZip} onChange={e => setDeliveryZip(e.target.value)} className="w-full p-4 border-2 border-slate-100 bg-slate-50 rounded-2xl focus:border-blue-500 outline-none text-sm font-black uppercase italic shadow-inner" placeholder="DELIVERY ZIP" />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-                        <div className="flex justify-between items-center mb-8 border-b border-slate-50 pb-6">
-                            <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] flex items-center italic">
-                                <PackagePlus size={20} className="mr-4 text-blue-600" /> [02] Commodity Profile
-                            </h4>
-                            <button onClick={addCargoLine} className="flex items-center gap-2 bg-slate-900 text-white text-[10px] font-black px-4 py-2 rounded-xl hover:bg-blue-600 transition-all uppercase tracking-widest shadow-xl italic shadow-slate-200">
-                                <Plus size={14}/> Add Node
-                            </button>
-                        </div>
-                        <div className="space-y-4">
-                            {cargoLines.map((line) => (
-                                <div key={line.id} className="grid grid-cols-12 gap-4 items-end bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-inner animate-fade-in group hover:bg-white transition-all">
-                                    <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">Qty</label><input type="number" value={line.quantity} onChange={e => updateCargoLine(line.id, 'quantity', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black outline-none focus:border-blue-500" /></div>
-                                    <div className="col-span-3"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">Type</label><select value={line.type} onChange={e => updateCargoLine(line.id, 'type', e.target.value as any)} className="w-full p-3 border-2 border-slate-200 rounded-xl text-[10px] font-black uppercase outline-none focus:border-blue-500 italic"><option value="PALLET">Pallet</option><option value="BOX">Box</option><option value="CONTAINER">Container</option></select></div>
-                                    <div className="col-span-4"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">LxWxH (cm)</label><div className="grid grid-cols-3 gap-1"><input type="number" value={line.length} onChange={e => updateCargoLine(line.id, 'length', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /><input type="number" value={line.width} onChange={e => updateCargoLine(line.id, 'width', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /><input type="number" value={line.height} onChange={e => updateCargoLine(line.id, 'height', Number(e.target.value))} className="p-2 border border-slate-200 rounded-lg text-xs text-center font-bold" /></div></div>
-                                    <div className="col-span-2"><label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">Kg ea.</label><input type="number" value={line.weightPerUnit} onChange={e => updateCargoLine(line.id, 'weightPerUnit', Number(e.target.value))} className="w-full p-3 border-2 border-slate-200 rounded-xl text-xs font-black outline-none" /></div>
-                                    <div className="col-span-1 flex justify-end pb-1"><button onClick={() => removeCargoLine(line.id)} className="p-3 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button></div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-200">
-                         <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] mb-12 border-b border-slate-50 pb-8 flex items-center italic">
-                            <Users size={20} className="mr-4 text-blue-600" /> [03] Preferred Carriers
-                         </h4>
-                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 max-h-[400px] overflow-y-auto pr-6 custom-scrollbar">
-                            {vendors.map(v => (
-                                <div key={v.id} onClick={() => setSelectedVendorIds(prev => prev.includes(v.id) ? prev.filter(x => x !== v.id) : [...prev, v.id])} className={`p-6 rounded-[2rem] border-2 cursor-pointer transition-all flex flex-col justify-between h-40 ${selectedVendorIds.includes(v.id) ? 'bg-indigo-600 border-indigo-600 text-white shadow-2xl scale-105 italic' : 'bg-white border-slate-100 hover:border-indigo-300 shadow-sm'}`}>
-                                    <div className="flex justify-between items-start">
-                                        <span className={`font-black text-[12px] uppercase italic ${selectedVendorIds.includes(v.id) ? 'text-white' : 'text-slate-900'}`}>{v.name}</span>
-                                        {selectedVendorIds.includes(v.id) && <CheckCircle size={14} />}
-                                    </div>
-                                    <div className="mt-auto"><span className={`text-[9px] font-black uppercase px-3 py-1 rounded-full ${selectedVendorIds.includes(v.id) ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{v.tier}</span></div>
-                                </div>
-                            ))}
-                         </div>
-                    </div>
-
-                    {originPort && destPort && selectedVendorIds.length > 0 && (
-                        <div className="bg-white p-12 rounded-[4rem] shadow-2xl border-4 border-blue-600 animate-fade-in">
-                            <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-[0.2em] mb-10 flex items-center italic"><Mail className="mr-4 text-blue-600" size={24} /> Broadcast Stack</h4>
-                            <div className="w-full h-96 p-12 bg-slate-900 border border-slate-800 rounded-[3rem] overflow-y-auto text-[13px] font-mono leading-relaxed text-blue-200 whitespace-pre-wrap italic">
-                                {formattedBroadcast}
-                            </div>
-                            <div className="mt-12 flex justify-end gap-6">
-                                <button onClick={() => handleCreateEnquiry(false)} className="px-12 py-5 border-2 border-slate-200 text-slate-500 font-black uppercase text-[12px] rounded-3xl hover:bg-slate-50 transition-all italic">Log Internally</button>
-                                <button onClick={() => handleCreateEnquiry(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[12px] px-16 py-6 rounded-3xl shadow-2xl active:scale-95 flex items-center gap-4 italic group">
-                                    <Send size={22} className="group-hover:translate-x-1" /> DISPATCH VIA EMAIL (MAILTO)
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="lg:col-span-4">
-                    <div className="bg-slate-900 text-white p-12 rounded-[4rem] shadow-2xl sticky top-8 border-t-8 border-blue-500 overflow-hidden italic">
-                        <div className="absolute -bottom-10 -right-10 opacity-5 transform rotate-45"><Zap size={240} /></div>
-                        <h4 className="text-3xl font-black tracking-tighter uppercase mb-10">MARKET PULSE</h4>
-                        <div className="space-y-10 relative z-10">
-                            <div className="p-8 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-inner">
-                                <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest mb-6">Aggregate Metrics</p>
-                                <div className="space-y-4 font-sans">
-                                    <div className="flex items-center justify-between"><p className="text-[10px] text-slate-400 uppercase font-black">Gross Weight</p><p className="text-xl font-black">{totalSpecs.weight.toLocaleString()} KG</p></div>
-                                    <div className="flex items-center justify-between"><p className="text-[10px] text-slate-400 uppercase font-black">Gross Volume</p><p className="text-xl font-black">{totalSpecs.volume.toFixed(3)} CBM</p></div>
-                                </div>
-                            </div>
-                            <div className="p-8 bg-blue-600/20 rounded-[2.5rem] border border-blue-500/30">
-                                <p className="text-[10px] font-black text-blue-300 uppercase tracking-widest mb-2">Buy target</p>
-                                <div className="text-4xl font-black">{currency} {targetRate.toLocaleString()}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        {/* Right Sidebar: Analytics & Checklist */}
+        <aside className="space-y-6">
+          <Card className="bg-slate-900 text-white border-0 shadow-xl" title="Commercial Metrics">
+            <div className="space-y-4">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-400">Total Actual Weight</span>
+                <span className="font-bold">{metrics.totalActualWeight} KG</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-400">Total Volume</span>
+                <span className="font-bold">{metrics.totalVolumeCbm.toFixed(3)} CBM</span>
+              </div>
+              <div className="pt-4 border-t border-white/10 flex justify-between items-center">
+                <span className="text-xs text-blue-400 font-bold uppercase tracking-widest">Chargeable units</span>
+                <span className="text-2xl font-black text-blue-400 animate-pulse">
+                  {metrics.chargeableUnits} {currentJob?.intakeData.modality === 'AIR' ? 'KG' : 'WM'}
+                </span>
+              </div>
             </div>
-        )}
+          </Card>
 
-        {activeTab === 'DASHBOARD' && (
-             <div className="bg-white rounded-[4rem] shadow-sm border border-slate-200 overflow-hidden min-h-[700px] flex flex-col animate-fade-in italic">
-                {enquiries.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center p-32 text-center opacity-40">
-                        <Inbox size={80} className="text-slate-200 mb-8" />
-                        <p className="text-2xl font-black tracking-tighter text-slate-300 uppercase italic">No Active Campaigns</p>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-slate-100 flex-1 font-sans">
-                        {enquiries.map(enquiry => (
-                            <div key={enquiry.id} className="p-12 hover:bg-blue-50/20 transition-all cursor-pointer group" onClick={() => toggleExpand(enquiry.id)}>
-                                <div className="flex flex-col xl:flex-row items-center justify-between gap-10">
-                                    <div className="flex-1">
-                                        <div className="flex flex-wrap items-center gap-6 mb-6">
-                                            <div className={`p-4 rounded-[1.75rem] text-white ${enquiry.modality === 'SEA' ? 'bg-blue-600' : 'bg-indigo-600'} shadow-lg`}>
-                                                {enquiry.modality === 'SEA' ? <Ship size={24} /> : <Plane size={24} />}
-                                            </div>
-                                            {getStatusBadge(enquiry.status)}
-                                            <span className="text-[13px] font-black text-slate-300 uppercase tracking-[0.3em]">{enquiry.reference}</span>
-                                        </div>
-                                        <div className="text-4xl font-black text-slate-900 uppercase tracking-tighter flex items-center italic mb-4">
-                                            {enquiry.origin} <ArrowRight className="mx-8 text-blue-200" size={40} /> {enquiry.destination}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-10 bg-slate-50/80 p-8 rounded-[3rem] border border-slate-100 shadow-inner">
-                                        <div className="text-center">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Recruited Bids</p>
-                                            <p className="text-5xl font-black text-blue-600 tracking-tighter">{enquiry.bids.length}</p>
-                                        </div>
-                                        <div className={`p-3.5 rounded-2xl transition-all ${expandedEnquiryId === enquiry.id ? 'bg-blue-600 text-white rotate-180' : 'bg-white text-slate-300'}`}>
-                                            <ChevronDown size={24} />
-                                        </div>
-                                    </div>
-                                </div>
-                                {expandedEnquiryId === enquiry.id && (
-                                    <div className="mt-16 pt-16 border-t border-slate-100 animate-fade-in">
-                                        <div className="bg-white rounded-[3rem] border border-slate-200 overflow-hidden shadow-2xl italic">
-                                            <table className="w-full text-left">
-                                                <thead className="bg-slate-900 text-white text-[12px] font-black uppercase tracking-[0.4em]">
-                                                    <tr><th className="p-8">Node</th><th className="p-8">Commercial Rate</th><th className="p-8">Lead Time</th><th className="p-8 text-right">Auth</th></tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-50">
-                                                    {enquiry.bids.length === 0 ? (
-                                                        <tr><td colSpan={4} className="p-24 text-center text-slate-400 font-black uppercase">Recruiting market intelligence...</td></tr>
-                                                    ) : enquiry.bids.map((bid, idx) => (
-                                                        <tr key={idx} className="hover:bg-blue-50/50 transition-all font-sans italic">
-                                                            <td className="p-8"><div className="font-black text-slate-900 uppercase text-sm">{bid.vendorName}</div></td>
-                                                            <td className="p-8"><div className="text-3xl font-black text-slate-900 italic">{bid.currency} {bid.amount.toLocaleString()}</div></td>
-                                                            <td className="p-8 text-sm font-black text-slate-800 uppercase">{bid.transitTime} {enquiry.modality === 'AIR' ? 'HRS' : 'DAYS'}</td>
-                                                            <td className="p-8 text-right">
-                                                                <div className="flex justify-end gap-4">
-                                                                    <button onClick={(e) => { e.stopPropagation(); simulateToQuoteEngine(enquiry, bid); }} className="px-8 py-4 bg-white border-2 border-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-widest rounded-2xl hover:border-blue-600 hover:text-blue-600 transition-all">Export to Quote</button>
-                                                                    <button onClick={(e) => { e.stopPropagation(); onAwardEnquiry(enquiry.id, bid, Math.round(bid.amount * 1.15)); }} className="px-10 py-4 bg-blue-600 text-white text-[11px] font-black uppercase tracking-widest rounded-2xl shadow-2xl active:scale-95 transition-all">AWARD</button>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
-             </div>
-        )}
+          <Card title="Completeness Checklist">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700">Verification Score</span>
+                <span className="text-sm font-black text-blue-600">{currentJob?.completenessScore}%</span>
+              </div>
+              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                <div className="bg-blue-600 h-full transition-all duration-500" style={{width: `${currentJob?.completenessScore}%`}} />
+              </div>
+              
+              <div className="pt-4 space-y-3">
+                {[
+                  { label: 'Routing DNA', ok: !!(currentJob?.intakeData.origin && currentJob?.intakeData.destination) },
+                  { label: 'Stakeholder Nodes', ok: !!(currentJob?.intakeData.shipperId && currentJob?.intakeData.consigneeId) },
+                  { label: 'Payload Nodes', ok: (currentJob?.intakeData.cargoLines.length || 0) > 0 },
+                  { label: 'Ready Date', ok: !!currentJob?.intakeData.readyDate }
+                ].map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-3">
+                    {item.ok ? <CheckCircle size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-slate-200" />}
+                    <span className={`text-xs font-semibold ${item.ok ? 'text-slate-700' : 'text-slate-300'}`}>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 };
 
-export default VendorEnquiryComponent;
+export default VendorEnquiry;

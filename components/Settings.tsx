@@ -1,410 +1,180 @@
 import React, { useState } from 'react';
-import { Save, RefreshCw, Bell, Globe, Layout, Mail, Shield, UserPlus, Users, Trash2, Key, Database, AlertOctagon, Anchor, Plane, Ship } from 'lucide-react';
+import { 
+  Save, Ship, Mail, DollarSign, Users, ShieldAlert, FileText, Database, ShieldCheck, 
+  Trash2, Plus, ArrowRight, UserPlus, Info, Terminal, Settings as SettingsIcon, Globe
+} from 'lucide-react';
 import { AppSettings, Currency, SharedProps, User, UserRole } from '../types';
+import { Card } from './ui/Card';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
 
 interface SettingsProps extends SharedProps {
   onUpdateSettings: (newSettings: AppSettings) => void;
-  users?: User[];
-  onAddUser?: (user: User) => void;
-  onDeleteUser?: (id: string) => void;
-  onUpdatePassword?: (password: string) => void;
-  onResetData?: (type: 'TRANSACTIONS' | 'FULL') => void;
+  users: User[];
+  onUpdateUsers: (newUsers: User[]) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ settings, onUpdateSettings, onNotify, users, onAddUser, onDeleteUser, onUpdatePassword, onResetData, userRole, currentUser }) => {
+type SettingsSection = 'USERS' | 'PRICING' | 'LEGAL' | 'GOVERNANCE' | 'SYSTEM';
+
+const Settings: React.FC<SettingsProps> = ({ settings, onUpdateSettings, users, onUpdateUsers, onNotify, userRole, hasPermission }) => {
+  const [activeSection, setActiveSection] = useState<SettingsSection>('USERS');
   const [formData, setFormData] = useState<AppSettings>(settings);
-  
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserRole, setNewUserRole] = useState<UserRole>('SALES');
-  const [newUserPass, setNewUserPass] = useState('');
-
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-
-  const handleChange = (field: keyof AppSettings, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleCommercialParam = (modality: 'sea' | 'air', key: string, value: number) => {
-    setFormData(prev => ({
-      ...prev,
-      commercialParameters: {
-        ...prev.commercialParameters,
-        [modality]: {
-          ...prev.commercialParameters[modality],
-          [key]: value
-        }
-      }
-    }));
-  };
+  const [editingUser, setEditingUser] = useState<User | null>(null);
 
   const handleSave = () => {
+    if (!hasPermission('EDIT_SETTINGS')) {
+      onNotify('error', 'Elevation required for settings persistence.');
+      return;
+    }
     onUpdateSettings(formData);
-    onNotify('success', 'System settings updated successfully.');
+    onNotify('success', 'Global governance synchronized.');
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!onAddUser || !newUserEmail || !newUserPass || !newUserName) return;
-
-    if (users?.some(u => u.email === newUserEmail)) {
-        onNotify('error', 'User with this email already exists.');
-        return;
+  const handleUserSave = (user: User) => {
+    const exists = users.find(u => u.id === user.id);
+    if (exists) {
+      onUpdateUsers(users.map(u => u.id === user.id ? user : u));
+    } else {
+      onUpdateUsers([...users, user]);
     }
-
-    const newUser: User = {
-        id: `U${Date.now()}`,
-        name: newUserName,
-        email: newUserEmail,
-        role: newUserRole,
-        password: newUserPass,
-        lastLogin: 'Never'
-    };
-
-    onAddUser(newUser);
-    setNewUserEmail('');
-    setNewUserName('');
-    setNewUserPass('');
-    setNewUserRole('SALES');
-  };
-
-  const handleChangePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!onUpdatePassword) return;
-    if (newPassword !== confirmPassword) {
-      onNotify('error', 'Passwords do not match.');
-      return;
-    }
-    if (newPassword.length < 6) {
-      onNotify('error', 'Password must be at least 6 characters.');
-      return;
-    }
-    onUpdatePassword(newPassword);
-    setNewPassword('');
-    setConfirmPassword('');
+    setEditingUser(null);
+    onNotify('success', 'User node updated.');
   };
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-4xl mx-auto pb-20">
-      <div className="bg-slate-900 text-white p-8 rounded-2xl shadow-xl flex justify-between items-center border border-slate-800">
+    <div className="max-w-screen-2xl mx-auto px-10 pb-24 animate-slide-up h-full flex flex-col">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 py-16">
         <div>
-          <h2 className="text-2xl font-bold flex items-center"><Layout className="mr-3 text-blue-500" /> Unique CCS Administration</h2>
-          <p className="text-slate-400 text-sm mt-1 font-medium">Global system defaults and corporate access control.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Platform Control Center</h1>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium leading-relaxed">System-wide operational parameters and global governance frameworks.</p>
         </div>
-        <button 
-          onClick={handleSave}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-lg transition-all active:scale-95"
-        >
-          <Save className="mr-2" size={18} /> Apply Changes
-        </button>
-      </div>
+        <Button onClick={handleSave} className="rounded-2xl px-10 py-3.5 shadow-2xl shadow-blue-500/10"><Save size={18} className="mr-1"/> Commit Changes</Button>
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        
-        {/* Sea Freight Parameters */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3 uppercase tracking-tighter italic">
-            <Ship className="mr-2 text-blue-600" size={20} /> Sea Logistics DNA
-          </h3>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">LCL Min CBM</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.sea.lclMinCbm}
-                  onChange={e => handleCommercialParam('sea', 'lclMinCbm', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">W/M Rule (kg)</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.sea.wmRule}
-                  onChange={e => handleCommercialParam('sea', 'wmRule', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
-                />
-              </div>
-            </div>
-            <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Standard Documentation Fee</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.sea.docFee}
-                  onChange={e => handleCommercialParam('sea', 'docFee', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
-                />
-            </div>
-            <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Default Local Charges (LCL)</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.sea.defaultLocalCharges}
-                  onChange={e => handleCommercialParam('sea', 'defaultLocalCharges', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold"
-                />
-            </div>
-          </div>
-        </div>
+      <div className="flex-1 grid grid-cols-12 gap-12">
+        <aside className="col-span-3 space-y-2">
+          {[
+            { id: 'USERS', label: 'Stakeholders', icon: Users },
+            { id: 'PRICING', label: 'Financial Guard', icon: DollarSign },
+            { id: 'LEGAL', label: 'Legal Engine', icon: FileText },
+            { id: 'GOVERNANCE', label: 'Node Prefixes', icon: Database },
+            { id: 'SYSTEM', label: 'Kernel Config', icon: SettingsIcon },
+          ].map(section => (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id as any)}
+              className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-semibold text-[11px] uppercase tracking-[0.15em] ${
+                activeSection === section.id 
+                  ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20 ring-1 ring-blue-500' 
+                  : 'text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm'
+              }`}
+            >
+              <section.icon size={16} /> {section.label}
+            </button>
+          ))}
+        </aside>
 
-        {/* Air Freight Parameters */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3 uppercase tracking-tighter italic">
-            <Plane className="mr-2 text-indigo-600" size={20} /> Air Logistics DNA
-          </h3>
-          <div className="space-y-4">
-            <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Volumetric Factor (cm3/kg)</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.air.volumetricFactor}
-                  onChange={e => handleCommercialParam('air', 'volumetricFactor', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
-                />
-                <p className="text-[9px] text-slate-400 mt-1 italic">Standard IATA: 6000 or 5000</p>
+        <div className="col-span-9 space-y-12 h-[calc(100vh-320px)] overflow-y-auto pr-6 custom-scrollbar scroll-smooth">
+          {activeSection === 'USERS' && (
+            <div className="space-y-10 animate-slide-up">
+               <div className="flex justify-between items-end">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest flex items-center gap-3">
+                      <ShieldAlert size={20} className="text-blue-500"/> User Registry & RBAC
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-2 font-medium italic">Manage active stakeholders and system-level permissions.</p>
+                  </div>
+                  <Button variant="outline" className="text-xs rounded-xl" onClick={() => setEditingUser({ id: `USR-${Date.now()}`, name: '', email: '', role: 'SALES', status: 'ACTIVE' })}>
+                    <UserPlus size={16}/> Add Node
+                  </Button>
+               </div>
+               <Card className="p-0 border-white/20">
+                  <table className="w-full text-left">
+                     <thead className="bg-slate-50/50 border-b border-black/[0.03]">
+                        <tr>
+                           <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Identity Node</th>
+                           <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Role Signal</th>
+                           <th className="px-8 py-5 text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Node Status</th>
+                           <th className="px-8 py-5"></th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y divide-black/[0.02]">
+                        {users.map(u => (
+                          <tr key={u.id} className="hover:bg-blue-50/10 transition-all">
+                             <td className="px-8 py-6">
+                                <p className="text-sm font-semibold text-slate-800 leading-none mb-1.5">{u.name}</p>
+                                <p className="text-[11px] text-slate-400 font-medium font-mono">{u.email}</p>
+                             </td>
+                             <td className="px-8 py-6"><Badge color={u.role === 'ADMIN' ? 'indigo' : 'slate'} className="px-3">{u.role}</Badge></td>
+                             <td className="px-8 py-6"><span className={`text-[11px] font-bold uppercase tracking-widest ${u.status === 'ACTIVE' ? 'text-emerald-500' : 'text-rose-400'}`}>{u.status}</span></td>
+                             <td className="px-8 py-6 text-right">
+                                <button onClick={() => setEditingUser(u)} className="p-3 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><SettingsIcon size={18}/></button>
+                             </td>
+                          </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </Card>
             </div>
-            <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Min Chargeable Weight (kg)</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.air.minChargeableWeight}
-                  onChange={e => handleCommercialParam('air', 'minChargeableWeight', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
-                />
-            </div>
-            <div>
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Default Security Surcharges</label>
-                <input 
-                  type="number" 
-                  value={formData.commercialParameters.air.defaultSurcharges}
-                  onChange={e => handleCommercialParam('air', 'defaultSurcharges', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-bold"
-                />
-            </div>
-          </div>
-        </div>
+          )}
 
-        {/* Profile Security */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3">
-                <Key className="mr-2 text-blue-600" size={20} /> Profile Security
-            </h3>
-            <form onSubmit={handleChangePassword} className="space-y-4">
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">New Account Password</label>
-                    <input 
-                        type="password"
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        value={newPassword}
-                        onChange={e => setNewPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                    />
+          {activeSection === 'PRICING' && (
+            <div className="space-y-10 animate-slide-up">
+               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest flex items-center gap-3 italic">
+                 <DollarSign size={20} className="text-emerald-500"/> Financial Architecture Guardrails
+               </h3>
+               <div className="grid grid-cols-2 gap-10">
+                  <Card title="Yield Logic Control">
+                     <div className="space-y-8 py-4">
+                        <div className="space-y-3">
+                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Global Min Yield Threshold (%)</label>
+                           <input type="number" className="w-full px-6 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl text-xl font-bold outline-none focus:ring-4 focus:ring-emerald-100 transition-all shadow-inner" value={formData.minMarginThreshold} onChange={e => setFormData({...formData, minMarginThreshold: Number(e.target.value)})} />
+                           <p className="text-[10px] text-slate-400 font-medium italic mt-2 ml-1">Quotes below this signal will trigger mandatory override nodes.</p>
+                        </div>
+                        <div className="space-y-3">
+                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] ml-1">Default Market Yield (%)</label>
+                           <input type="number" className="w-full px-6 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl text-xl font-bold outline-none focus:ring-4 focus:ring-blue-100 transition-all shadow-inner" value={formData.defaultMarginPercent} onChange={e => setFormData({...formData, defaultMarginPercent: Number(e.target.value)})} />
+                        </div>
+                     </div>
+                  </Card>
+                  <Card title="Base Conversion Matrix">
+                     <div className="grid grid-cols-2 gap-6 py-4">
+                        {(['USD', 'EUR', 'CNY', 'GBP'] as Currency[]).map(curr => (
+                           <div key={curr} className="space-y-2">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase italic ml-1">1 AED = X {curr}</label>
+                              <input type="number" step="0.0001" className="w-full px-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-400 transition-all" value={formData.exchangeRates[curr]} onChange={e => setFormData({...formData, exchangeRates: {...formData.exchangeRates, [curr]: Number(e.target.value)}})} />
+                           </div>
+                        ))}
+                     </div>
+                  </Card>
+               </div>
+            </div>
+          )}
+
+          {activeSection === 'LEGAL' && (
+             <div className="space-y-10 animate-slide-up">
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest flex items-center gap-3 italic">
+                  <FileText size={20} className="text-blue-500"/> Governance Framework Editor
+                </h3>
+                <div className="grid grid-cols-1 gap-10 pb-16">
+                   {[
+                     { k: 'general', l: 'Universal Terms & Conditions Node' },
+                     { k: 'air', l: 'Air Freight Provision Specs' },
+                     { k: 'sea', l: 'Sea Freight & BOL Architecture' },
+                     { k: 'courier', l: 'Courier Liability Kernel' }
+                   ].map(field => (
+                     <div key={field.k} className="space-y-4">
+                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">{field.l}</label>
+                        <textarea 
+                           className="w-full p-8 bg-white/40 border border-slate-200 rounded-[32px] text-sm font-medium h-56 outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400 transition-all italic leading-relaxed shadow-inner" 
+                           value={formData.legalTerms[field.k as keyof AppSettings['legalTerms']]} 
+                           onChange={e => setFormData({...formData, legalTerms: {...formData.legalTerms, [field.k]: e.target.value}})} 
+                        />
+                     </div>
+                   ))}
                 </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Verify Password</label>
-                    <input 
-                        type="password"
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        value={confirmPassword}
-                        onChange={e => setConfirmPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                    />
-                </div>
-                <button type="submit" className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-colors">
-                    Save New Credentials
-                </button>
-            </form>
-        </div>
-
-        {/* User Management */}
-        {userRole === 'ADMIN' && users && onAddUser && (
-            <div className="md:col-span-2 bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-                 <h3 className="text-lg font-bold text-slate-800 mb-8 flex items-center border-b pb-3">
-                    <Users className="mr-2 text-indigo-600" size={20} /> Workforce & Access Management
-                 </h3>
-                 
-                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                    <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
-                        <h4 className="text-xs font-bold text-slate-700 uppercase mb-6 flex items-center tracking-widest">
-                            <UserPlus size={16} className="mr-2 text-indigo-500"/> Register New Workforce
-                        </h4>
-                        <form onSubmit={handleCreateUser} className="space-y-4">
-                            <input 
-                                placeholder="Employee Full Name" 
-                                value={newUserName}
-                                onChange={e => setNewUserName(e.target.value)}
-                                className="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white"
-                                required
-                            />
-                            <input 
-                                type="email"
-                                placeholder="Work Email (@uniqueccs.com)" 
-                                value={newUserEmail}
-                                onChange={e => setNewUserEmail(e.target.value)}
-                                className="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white"
-                                required
-                            />
-                            <div className="grid grid-cols-2 gap-4">
-                                <select 
-                                    value={newUserRole}
-                                    onChange={e => setNewUserRole(e.target.value as UserRole)}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white font-medium"
-                                >
-                                    <option value="ADMIN">Administrator</option>
-                                    <option value="MANAGER">Manager</option>
-                                    <option value="SALES">Sales Agent</option>
-                                    <option value="OPS">Operations Specialist</option>
-                                </select>
-                                <input 
-                                    type="password"
-                                    placeholder="Initial Password" 
-                                    value={newUserPass}
-                                    onChange={e => setNewUserPass(e.target.value)}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm bg-white"
-                                    required
-                                />
-                            </div>
-                            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg text-sm transition-all shadow-lg shadow-indigo-100">
-                                Create Employee Account
-                            </button>
-                        </form>
-                    </div>
-
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
-                                <tr>
-                                    <th className="p-4">Personnel</th>
-                                    <th className="p-4">Access Level</th>
-                                    <th className="p-4 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {users.map(u => (
-                                    <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-4">
-                                            <div className="font-bold text-slate-800">{u.name}</div>
-                                            <div className="text-[10px] text-slate-400 font-mono">{u.email}</div>
-                                        </td>
-                                        <td className="p-4">
-                                            <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100">{u.role}</span>
-                                        </td>
-                                        <td className="p-4 text-right">
-                                            {u.id !== currentUser.id && onDeleteUser && (
-                                                <button onClick={() => onDeleteUser(u.id)} className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-all">
-                                                    <Trash2 size={16}/>
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                 </div>
-            </div>
-        )}
-
-        {/* Corporate Identity */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3">
-            <Globe className="mr-2 text-emerald-600" size={20} /> Corporate Identity
-          </h3>
-          <div className="space-y-5">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Company Display Name</label>
-              <input 
-                type="text" 
-                value={formData.companyName}
-                onChange={e => handleChange('companyName', e.target.value)}
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-slate-800"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Primary Currency</label>
-                <select 
-                  value={formData.defaultCurrency}
-                  onChange={e => handleChange('defaultCurrency', e.target.value as Currency)}
-                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white outline-none font-medium"
-                >
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
-                  <option value="CNY">CNY (¥)</option>
-                  <option value="AED">AED</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Standard Margin (%)</label>
-                <input 
-                  type="number" 
-                  value={formData.defaultMarginPercent}
-                  onChange={e => handleChange('defaultMarginPercent', Number(e.target.value))}
-                  className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Corporate Communications */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center border-b pb-3">
-            <Mail className="mr-2 text-blue-600" size={20} /> Corporate Communications
-          </h3>
-          <div className="space-y-5">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Primary Email Gateway</label>
-              <select 
-                  value={formData.emailProvider || 'OFFICE365'}
-                  onChange={e => handleChange('emailProvider', e.target.value)}
-                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white outline-none font-bold text-blue-700"
-              >
-                  <option value="OFFICE365">Microsoft Office 365 (Corporate Standard)</option>
-                  <option value="NATIVE">Native Local Client (Outlook/Mail App)</option>
-                  <option value="GMAIL">Google Workspace (Gmail Web)</option>
-              </select>
-              <p className="text-[10px] text-slate-400 mt-2 italic flex items-center"><Shield size={10} className="mr-1"/> Integrated with @uniqueccs.com domain</p>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Universal Email Signature</label>
-              <textarea 
-                value={formData.emailSignature}
-                onChange={e => handleChange('emailSignature', e.target.value)}
-                className="w-full p-2.5 border border-slate-300 rounded-lg h-24 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none text-slate-600"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* System & Compliance */}
-        <div className="md:col-span-2 bg-slate-900 p-8 rounded-2xl border border-slate-800 text-white">
-          <h3 className="text-lg font-bold mb-6 flex items-center border-b border-slate-800 pb-3">
-            <Shield className="mr-2 text-blue-500" size={20} /> Unique CCS Compliance & Status
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-            <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Infrastructure</p>
-              <p className="font-mono text-sm text-slate-300">Enterprise Build v3.5.0</p>
-              <p className="text-[10px] text-slate-600 mt-1">Microsoft 365 Connected</p>
-            </div>
-            <div>
-               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Production Domain</p>
-               <p className="font-mono text-sm text-slate-300">uniqueccs.com</p>
-               <p className="text-[10px] text-emerald-500 mt-1 flex items-center"><Database size={10} className="mr-1" /> SQL Storage Sync: Active</p>
-            </div>
-            <div>
-               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Licensing</p>
-               <span className="inline-flex items-center px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-600/20 text-blue-400 border border-blue-500/30">
-                 Platinum Enterprise
-               </span>
-            </div>
-          </div>
+             </div>
+          )}
         </div>
       </div>
     </div>
